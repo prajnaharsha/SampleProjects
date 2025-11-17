@@ -1,0 +1,36 @@
+{% extends "layout.html" %} {% block content %}
+<h2 class="mb-4">Students List</h2>
+
+<table class="table table-bordered table-striped shadow-sm">
+  <thead class="table-dark">
+    <tr>
+      <th>Roll</th>
+      <th>Name</th>
+      <th>Department</th>
+      <th>Marks</th>
+      <th class="text-center">Action</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {% for s in students %}
+    <tr>
+      <td>{{ s.roll }}</td>
+      <td>{{ s.name }}</td>
+      <td>{{ s.department }}</td>
+      <td>{{ s.marks }}</td>
+      <td class="text-center">
+        <a href="/update/{{ s.roll }}" class="btn btn-warning btn-sm">Update</a>
+        <a
+          href="/delete/{{ s.roll }}"
+          class="btn btn-danger btn-sm"
+          onclick="return confirm('Are you sure you want to delete this student?');"
+        >
+          Delete
+        </a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

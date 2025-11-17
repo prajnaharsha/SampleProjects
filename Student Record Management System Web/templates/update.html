@@ -1,0 +1,48 @@
+{% extends "layout.html" %} {% block content %}
+<h2 class="mb-4">Update Student</h2>
+
+<form
+  method="post"
+  action="/update/{{ student.roll }}"
+  class="card p-4 shadow-sm"
+>
+  <div class="mb-3">
+    <label class="form-label">Name</label>
+    <input
+      type="text"
+      name="name"
+      value="{{ student.name }}"
+      class="form-control"
+      required
+    />
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Department</label>
+    <input
+      type="text"
+      name="department"
+      value="{{ student.department }}"
+      class="form-control"
+      required
+    />
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Marks</label>
+    <input
+      type="number"
+      step="0.01"
+      name="marks"
+      value="{{ student.marks }}"
+      class="form-control"
+      required
+    />
+  </div>
+
+  <div class="d-flex justify-content-end gap-3">
+    <button class="btn btn-success">Update Student</button>
+    <a href="/view" class="btn btn-warning">Cancel</a>
+  </div>
+</form>
+{% endblock %}
