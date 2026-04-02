@@ -7,6 +7,7 @@ import streamlit as st
 import threading
 import time
 import gemini_agent as agent  # always use Gemini
+import re
 
 # -------------------------------  
 # INIT STATE  
@@ -80,6 +81,14 @@ with left:
         thread.start()
         st.session_state.agent_thread = thread
 
+    def to_number(price):
+        if isinstance(price, (int, float)):
+            return price
+        if isinstance(price, str):
+            cleaned = re.sub(r"[^\d.]", "", price)
+            return float(cleaned) if cleaned else 0
+        return 0
+
     def stop_agent():
         st.session_state.agent_state["agent_running"] = False
 
@@ -118,45 +127,51 @@ with left:
     if all_offers:
         st.subheader("🎁 Available Offers")
 
-        # Categorize offers
-        offer_types = {
-            "Bank Offers": offers.get("bank_offers", []),
-            "Coupons": offers.get("coupons", []),
-            "Exchange Offers": offers.get("exchange_offers", []),
-        }
+        label_to_offer = {}
 
-        # Flatten all offers into a single list for mutual exclusivity
-        flat_labels = []
-        label_to_offer = {}  # Map label to offer
-        for category, items in offer_types.items():
-            for o in items:
-                if category == "Bank Offers":
-                    label = f"{category}: {o.get('bank_name', 'Bank')} - {o.get('discount', '')}"
-                elif category == "Coupons":
-                    label = f"{category}: Code {o.get('code', '')} - {o.get('discount', '')}"
-                elif category == "Exchange Offers":
-                    label = f"{category}: {o.get('discount', '')}"
-                flat_labels.append(label)
-                label_to_offer[label] = o
+        options = []
 
-        # Add a main "None" option at the top
-        flat_labels = ["None"] + flat_labels
+        # ✅ NONE (top, visually separated)
+        options.append("🚫 None")
 
-        # Single radio for all offers
-        selected = st.radio("Select an offer (only one can be selected)", flat_labels, index=0)
+        # BANK OFFERS
+        bank_offers = offers.get("bank_offers", [])
+   
+        for o in bank_offers:
+            label = f"🏦 {o.get('bank', 'Bank')} - {o.get('discount', '')}"
+            options.append(label)
+            label_to_offer[label] = o
 
-        if selected != "None":
+        # COUPONS
+        coupons = offers.get("coupons", [])
+        for o in coupons:
+            label = f"🏷️ Code {o.get('code', '')} - {o.get('discount', '')}"
+            options.append(label)
+            label_to_offer[label] = o
+
+        # EXCHANGE
+        exchange_offers = offers.get("exchange_offers", [])
+        for o in exchange_offers:
+            label = f"🔄 {o.get('discount', '')}"
+            label = f"🏷️ Exchange Offer - {o.get('discount', '')}"
+            options.append(label)
+            label_to_offer[label] = o
+
+        # 🔘 SINGLE radio (enforces one selection)
+        selected = st.radio(
+            "Select an offer (only one can be selected)",
+            options,
+            index=0
+        )
+
+        # 💰 Logic
+        if selected != "🚫 None":
             chosen_offer = label_to_offer[selected]
-            # Get final price from chosen_offer, fallback to original_price
-            final_price = chosen_offer.get("final_price", state['current_price'])
-            # Display only the final price prominently
-            st.markdown(f"### 💰 Final Price: ₹{final_price:,}", unsafe_allow_html=True)
+            final_price = to_number(chosen_offer.get("final_price", state['current_price']))
+            st.markdown(f"### 💰 Final Price: ₹{final_price:,.0f}", unsafe_allow_html=True)
         else:
-            # Show original price if no offer selected
-            st.markdown(f"### 💰 Final Price: ₹{state['current_price']:,.0f}", unsafe_allow_html=True)         
-
-    else:
-        st.info("No offers available")
+            price = to_number(state['current_price'])
+            st.markdown(f"### 💰 Final Price: ₹{price:,.0f}", unsafe_allow_html=True)
     
     #if state.get("best_code"):
     #    st.success(f"Best Coupon Applied: {state['best_code']}")

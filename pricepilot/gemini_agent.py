@@ -38,8 +38,19 @@ def get_popular_sites(product,state):
     Example:
     {{
         "Amazon": "https://www.amazon.in/s?k={{q}}",
-        "Flipkart": "https://www.flipkart.com/search?q={{q}}"
+        "Flipkart": "https://www.flipkart.com/search?q={{q}}",
+        "Reliance Digital": "https://www.reliancedigital.in/products?q={{q}}", 
+        "Croma": "https://www.croma.com/searchB?q={{q}}%3Arelevance"
     }}
+
+    Return ONLY these 4 websites with their exact search URLs:
+    - Amazon
+    - Flipkart
+    - Reliance Digital
+    - Croma
+
+    Use the exact URL patterns given. Do not infer or modify them.
+
     """
 
     if "action_log" not in state:
@@ -109,35 +120,8 @@ def extract_price(page):
     try:
         page.wait_for_load_state("networkidle", timeout=5000)
     except:
-        pass
-
-    # ---------------------------
-    # Flipkart-specific selectors
-    # ---------------------------
-    flipkart_selectors = [
-        "div._30jeq3",
-        "div[class*='_30jeq3']"
-    ]
-
-    for sel in flipkart_selectors:
-        try:
-            locator = page.locator(sel)
-            if locator.count() == 0:
-                continue
-
-            raw = locator.first.inner_text().strip()
-            if "₹" not in raw:  # ensure it's a price
-                continue
-
-            match = re.search(r"[\d,]+", raw)
-            if match:
-                price = float(match.group().replace(",", ""))
-                if price > 0:
-                    return price
-        except Exception as e:
-            print(f"[Flipkart] Selector {sel} failed: {e}")
-            continue
-    
+        pass    
+   
 
     selectors = [
         # Flipkart (product page)
@@ -153,6 +137,13 @@ def extract_price(page):
         "div.product-wrapper div.price",
         "div.product-card div.price",
         "span.price",
+
+        # Croma (product + listing pages)
+        "span.amount",
+        "span.new-price",
+        "span.old-price",
+        "div.price-section span",
+        "div.product-price span",
 
         # Generic
         "span.price",
@@ -373,7 +364,47 @@ def is_valid_discount(txt):
     txt = txt.lower()
     return bool(re.search(r"\d", txt))  # just needs a number
 
-  
+def prepare_page_for_ai(page, state):
+    try:
+        # Wait for stability
+        page.wait_for_load_state("networkidle", timeout=5000)
+    except:
+        pass
+
+    log(state, "🧠 Preparing page for AI...", "info")
+
+    # 🔽 Scroll to offers section
+    for _ in range(2):
+        page.mouse.wheel(0, 1200)
+        page.wait_for_timeout(1000)
+
+    # 🔘 Click "Available offers"
+    try:
+        btn = page.locator("text=Available offers").first
+        if btn.count() > 0:
+            btn.click()
+            page.wait_for_timeout(2000)
+            log(state, "✅ Opened 'Available offers'", "info")
+    except:
+        pass
+
+    # 🔘 Click "more offers"
+    try:
+        more = page.locator("text=more").first
+        if more.count() > 0:
+            more.click()
+            page.wait_for_timeout(2000)
+            log(state, "✅ Expanded more offers", "info")
+    except:
+        pass
+
+    # 🔽 Extra scroll (important for lazy load)
+    for _ in range(2):
+        page.mouse.wheel(0, 1000)
+        page.wait_for_timeout(1000)
+
+    page.wait_for_timeout(1500)
+
 def apply_coupons(page, state, codes):
 
     import re
@@ -385,29 +416,8 @@ def apply_coupons(page, state, codes):
     base_price = state.get("current_price", 0)
     state["base_price"] = base_price
 
-    # -----------------------------
-    # 📜 STEP 2: Scroll + expand offers
-    # -----------------------------
-    try:
-        page.mouse.wheel(0, 1500)
-        page.wait_for_timeout(800)
-
-        # Click "Available offers"
-        btn = page.locator("text=Available offers").first
-        if btn.count() > 0:
-            btn.click()
-            page.wait_for_timeout(1500)
-            log(state, "🎯 Opened offers section", "info")
-
-        # Expand "more"
-        more = page.locator("text=more").first
-        if more.count() > 0:
-            more.click()
-            page.wait_for_timeout(1000)
-            log(state, "➕ Expanded more offers", "info")
-
-    except:
-        pass
+    # 🧠 STEP 2: Prepare page for AI (NEW)
+    prepare_page_for_ai(page, state)
 
     # -----------------------------
     # 🤖 STEP 3: AI extraction
