@@ -1,17 +1,19 @@
 import asyncio, sys
+import threading
+import time
+import re
+import streamlit as st
+import gemini_agent as agent  # always use Gemini
 
+# -------------------------------
+# Windows asyncio fix
+# -------------------------------
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-import streamlit as st
-import threading
-import time
-import gemini_agent as agent  # always use Gemini
-import re
-
-# -------------------------------  
-# INIT STATE  
-# -------------------------------  
+# -------------------------------
+# INIT STATE
+# -------------------------------
 if "agent_state" not in st.session_state:
     st.session_state.agent_state = {
         "action_log": [],
@@ -24,74 +26,117 @@ if "agent_state" not in st.session_state:
         "original_price": None,
         "current_price": None,
         "price_comparison": {},
+        "offers": {},
+        "current_product": "",
     }
 
 if "agent_thread" not in st.session_state:
     st.session_state.agent_thread = None
 
-# -------------------------------  
-# PAGE CONFIG  
-# -------------------------------  
+# -------------------------------
+# PAGE CONFIG
+# -------------------------------
 st.set_page_config(page_title="PricePilot", layout="wide")
 
-st.title("🛒 PricePilot – AI Deal Finder")
+# -------------------------------
+# HELPER FUNCTIONS
+# -------------------------------
+def to_number(price):
+    if isinstance(price, (int, float)):
+        return price
+    if isinstance(price, str):
+        cleaned = re.sub(r"[^\d.]", "", price)
+        return float(cleaned) if cleaned else 0
+    return 0
 
-# -------------------------------  
-# LAYOUT (MAIN CHANGE)  
-# -------------------------------  
+def start_agent():
+    if st.session_state.agent_state["agent_running"]:
+        return
+    st.session_state.agent_state["action_log"] = []
+    st.session_state.agent_state["agent_running"] = True
+    st.session_state.agent_state["approval_pending"] = False
+    st.session_state.agent_state["approval_response"] = None
+    st.session_state.agent_state["best_code"] = None
+
+    extra_codes = []
+    if user_codes.strip():
+        extra_codes = [c.strip() for c in user_codes.split(",") if c.strip()]
+
+    thread = threading.Thread(
+        target=agent.run,
+        args=(
+            product,
+            goal,
+            st.session_state.agent_state,
+            extra_codes,
+        ),
+        daemon=True,
+    )
+    thread.start()
+    st.session_state.agent_thread = thread
+
+def stop_agent():
+    st.session_state.agent_state["agent_running"] = False
+
+# -------------------------------
+# NAVBAR (Sticky Top, no rounded corners)
+# -------------------------------
+current_product = st.session_state.agent_state.get('current_product', '').strip()
+
+st.markdown(
+    f"""
+    <style>
+    .navbar {{
+        position: sticky;
+        top: 0;
+        background-color: #4B6CFE;
+        color: white;
+        padding: 15px;
+        font-size: 24px;
+        text-align: center;
+        z-index: 9999;
+    }}
+    .fancy-button {{
+        background-color:#4B6CFE;
+        color:white;
+        padding:10px 20px;
+        border-radius:8px;
+        border:none;
+        cursor:pointer;
+        font-size:16px;
+        margin-right:10px;
+    }}
+    .fancy-button.stop {{
+        background-color:#FF4B4B;
+    }}
+    .fancy-button:hover {{
+        opacity:0.8;
+    }}
+    </style>
+    <div class="navbar">
+        🛒 PricePilot{f' – {current_product}' if current_product else ''}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ===============================
+# SEARCH & LAYOUT
+# ===============================
 left, right = st.columns([1, 1])
 
-# ===============================
-# LEFT SIDE (MAIN UI)
-# ===============================
 with left:
     st.subheader("🔍 Search")
-
     product = st.text_input("Enter product", "Samsung Galaxy S21 FE")
-    goal = st.text_input("Goal", "Find cheapest price and apply best coupon")
-    user_codes = st.text_input("Extra coupon codes (comma separated)", "")
+    goal = ""  # Keep empty string for backward compatibility
+    user_codes = ""  # Keep empty string for backward compatibility
 
-    # ---------------------------
-    # START / STOP
-    # ---------------------------
-    def start_agent():
-        if st.session_state.agent_state["agent_running"]:
-            return
+    st.session_state.agent_state["current_product"] = product
 
-        st.session_state.agent_state["action_log"] = []
-        st.session_state.agent_state["agent_running"] = True
-        st.session_state.agent_state["approval_pending"] = False
-        st.session_state.agent_state["approval_response"] = None
-        st.session_state.agent_state["best_code"] = None
+    # Only colored Start/Stop buttons
+ 
 
-        extra_codes = []
-        if user_codes.strip():
-            extra_codes = [c.strip() for c in user_codes.split(",") if c.strip()]
-
-        thread = threading.Thread(
-            target=agent.run,
-            args=(
-                product,
-                goal,
-                st.session_state.agent_state,
-                extra_codes,
-            ),
-            daemon=True,
-        )
-        thread.start()
-        st.session_state.agent_thread = thread
-
-    def to_number(price):
-        if isinstance(price, (int, float)):
-            return price
-        if isinstance(price, str):
-            cleaned = re.sub(r"[^\d.]", "", price)
-            return float(cleaned) if cleaned else 0
-        return 0
-
-    def stop_agent():
-        st.session_state.agent_state["agent_running"] = False
-
+    # Hidden Streamlit buttons for callback
     col1, col2 = st.columns(2)
     with col1:
         st.button("▶ Start Agent", on_click=start_agent)
@@ -101,95 +146,87 @@ with left:
     state = st.session_state.agent_state
 
     # ---------------------------
-    # FINAL RESULTS (NEW)
+    # PRICE COMPARISON
     # ---------------------------
-    st.subheader("💰 Results")
-
     if state.get("price_comparison"):
-        st.write("**Price Comparison:**")
+        st.markdown("### 🏷️ Price Comparison")
         for site, data in state["price_comparison"].items():
-            st.write(f"- {site}: ₹{data['price']:,.0f}")
+            st.metric(label=site, value=f"₹{data['price']:,.0f}")
 
-    if state.get("original_price"):
-        st.write(f"Original Price: ₹{state['original_price']:,.0f}")
+    # ---------------------------
+    # PRICE OVERVIEW
+    # ---------------------------
+    if state.get("original_price") and state.get("current_price"):
+        st.markdown("### 💸 Price Overview")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Original Price", f"₹{state['original_price']:,.0f}", delta_color="off")
+        with col2:
+            st.metric("Current Price", f"₹{state['current_price']:,.0f}", delta_color="normal")
 
-    if state.get("current_price"):
-        st.write(f"Final Price: ₹{state['current_price']:,.0f}")
-
+    # ---------------------------
+    # OFFERS - COLORFUL CARDS
+    # ---------------------------
     offers = state.get("offers", {})
-
-    all_offers = (
-        offers.get("bank_offers", []) +
-        offers.get("coupons", []) +
-        offers.get("exchange_offers", [])
-    )
+    all_offers = offers.get("bank_offers", []) + offers.get("coupons", []) + offers.get("exchange_offers", [])
 
     if all_offers:
-        st.subheader("🎁 Available Offers")
-
+        st.markdown("### 🎁 Available Offers")
         label_to_offer = {}
+        options = ["🚫 None"]
 
-        options = []
-
-        # ✅ NONE (top, visually separated)
-        options.append("🚫 None")
-
-        # BANK OFFERS
-        bank_offers = offers.get("bank_offers", [])
-   
-        for o in bank_offers:
-            label = f"🏦 {o.get('bank', 'Bank')} - {o.get('discount', '')}"
+        for o in offers.get("bank_offers", []):
+            label = f"🏦 {o.get('bank')} - {o.get('discount', '')}"
             options.append(label)
             label_to_offer[label] = o
+            st.markdown(
+                f"<div style='border-radius:10px;padding:10px;margin:5px;background-color:#d4edda'>"
+                f"<b>🏦 Bank Offer</b><br>{o.get('bank')} - {o.get('discount', '')}</div>",
+                unsafe_allow_html=True,
+            )
 
-        # COUPONS
-        coupons = offers.get("coupons", [])
-        for o in coupons:
-            label = f"🏷️ Code {o.get('code', '')} - {o.get('discount', '')}"
+        for o in offers.get("coupons", []):
+            label = f"🏷️ Code {o.get('code')} - {o.get('discount', '')}"
             options.append(label)
             label_to_offer[label] = o
+            st.markdown(
+                f"<div style='border-radius:10px;padding:10px;margin:5px;background-color:#d1ecf1'>"
+                f"<b>🏷️ Coupon</b><br>Code: {o.get('code')} - {o.get('discount', '')}</div>",
+                unsafe_allow_html=True,
+            )
 
-        # EXCHANGE
-        exchange_offers = offers.get("exchange_offers", [])
-        for o in exchange_offers:
-            label = f"🔄 {o.get('discount', '')}"
-            label = f"🏷️ Exchange Offer - {o.get('discount', '')}"
+        for o in offers.get("exchange_offers", []):
+            label = f"🔄 Exchange - {o.get('discount', '')}"
             options.append(label)
             label_to_offer[label] = o
+            st.markdown(
+                f"<div style='border-radius:10px;padding:10px;margin:5px;background-color:#fff3cd'>"
+                f"<b>🔄 Exchange</b><br>{o.get('discount', '')}</div>",
+                unsafe_allow_html=True,
+            )
 
-        # 🔘 SINGLE radio (enforces one selection)
-        selected = st.radio(
-            "Select an offer (only one can be selected)",
-            options,
-            index=0
-        )
+        selected = st.radio("Select an offer", options, index=0)
 
-        # 💰 Logic
         if selected != "🚫 None":
             chosen_offer = label_to_offer[selected]
             final_price = to_number(chosen_offer.get("final_price", state['current_price']))
-            st.markdown(f"### 💰 Final Price: ₹{final_price:,.0f}", unsafe_allow_html=True)
+            st.markdown(f"<h3 style='color:green'>💰 Final Price After Offer: ₹{final_price:,.0f}</h3>", unsafe_allow_html=True)
         else:
-            price = to_number(state['current_price'])
-            st.markdown(f"### 💰 Final Price: ₹{price:,.0f}", unsafe_allow_html=True)
-    
-    #if state.get("best_code"):
-    #    st.success(f"Best Coupon Applied: {state['best_code']}")
-
-        
+            st.markdown(f"<h3 style='color:blue'>💰 Final Price: ₹{state['current_price']:,.0f}</h3>", unsafe_allow_html=True)
 
 # ===============================
-# RIGHT SIDE (LOGS)
+# RIGHT SIDE - PROGRESS + LIVE LOGS
 # ===============================
 with right:
+    if state.get("agent_running"):
+        st.subheader("🤖 Agent Progress")
+        progress = min(len(state["action_log"]), 10) * 10
+        st.progress(progress)
+
     st.subheader("📜 Live Logs")
-    log_container = st.container(height=500)
-
-    with log_container:
-        for log in st.session_state.agent_state["action_log"]:
-            msg = log.get("msg", "")
-            typ = log.get("type", "info")
-
+    with st.expander("Show/Hide Logs", expanded=True):
+        for log in state["action_log"]:
+            msg, typ = log.get("msg", ""), log.get("type", "info")
             if typ == "success":
                 st.success(msg)
             elif typ == "warning":
@@ -202,6 +239,6 @@ with right:
 # -------------------------------
 # AUTO REFRESH
 # -------------------------------
-if st.session_state.agent_state.get("agent_running"):
+if state.get("agent_running"):
     time.sleep(1)
     st.rerun()
