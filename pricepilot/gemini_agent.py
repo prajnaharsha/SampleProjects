@@ -23,10 +23,11 @@ FALLBACK_SITES = {
 
 DEFAULT_CODES = ["SAVE10", "SAVE20", "DEAL10"]
 
+
 def get_popular_sites(product,state):
    
     """
-    Ask AI to suggest top Indian e-commerce site Reliance Digital for a given product.
+    Ask AI to suggest top Indian e-commerce sites for a given product.
     Returns a dictionary {site_name: search_url_template}.
     """
     prompt = f"""
@@ -42,12 +43,15 @@ def get_popular_sites(product,state):
         "Reliance Digital": "https://www.reliancedigital.in/products?q={{q}}", 
         "Croma": "https://www.croma.com/searchB?q={{q}}%3Arelevance"
     }}
-    Return ONLY Reliance Digital with their exact search URLs:
-    
+
+    Return ONLY these 4 websites with their exact search URLs:
+    - Amazon
+    - Flipkart
     - Reliance Digital
-   
+    - Croma
 
     Use the exact URL patterns given. Do not infer or modify them.
+
 
     """
 

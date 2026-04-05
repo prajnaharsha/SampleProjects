@@ -34,6 +34,74 @@ if "agent_thread" not in st.session_state:
     st.session_state.agent_thread = None
 
 # -------------------------------
+# PAGE STYLING
+# -------------------------------
+st.markdown(
+    """
+    <style>
+    /* Page background */
+    .stApp {
+        background-color: #f0f0f0;  /* light gray */
+    }
+
+    /* Make text input areas white */
+    .stTextInput>div>div>input {
+        background-color: white !important;
+        color: black;
+    }
+
+    /* Optional: make text area white too */
+    .stTextArea>div>div>textarea {
+        background-color: white !important;
+        color: black;
+    }
+
+    /* Optional: make selectbox white */
+    .stSelectbox>div>div>div>select {
+        background-color: white !important;
+        color: black;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# -------------------------------
+# HIDE STREAMLIT MENU / DEPLOY BUTTON
+# -------------------------------
+st.markdown(
+    """
+    <style>
+    /* Hide top-right menu including Deploy button */
+    #MainMenu {visibility: hidden !important;}
+
+    /* Hide top header bar completely */
+    header {visibility: hidden !important; height: 0px;}
+
+    /* Hide footer (optional) */
+    footer {visibility: hidden !important;}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+st.markdown(
+    """
+    <style>
+    /* Remove top padding/margin */
+    .css-18e3th9 {  /* main app container */
+        padding-top: 1rem;  /* reduce from default ~5rem */
+    }
+
+    /* Optional: reduce spacing between header and first element */
+    .stApp > div:first-child {
+        margin-top: 0px;
+        padding-top: 0px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+# -------------------------------
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="PricePilot", layout="wide")
@@ -133,15 +201,16 @@ with left:
 
     st.session_state.agent_state["current_product"] = product
 
-    # Only colored Start/Stop buttons
- 
-
+    
     # Hidden Streamlit buttons for callback
     col1, col2 = st.columns(2)
     with col1:
-        st.button("▶ Start Agent", on_click=start_agent)
+      
+       st.button("🟢 Start Agent", on_click=start_agent, key="start_agent")
+
     with col2:
-        st.button("⛔ Stop Agent", on_click=stop_agent)
+        
+        st.button("⛔ Stop Agent", on_click=stop_agent, key="stop_agent")
 
     state = st.session_state.agent_state
 
