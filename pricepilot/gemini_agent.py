@@ -469,7 +469,7 @@ def extract_offers_from_html(page, state,base_price):
         )
         
         data = extract_json(res.text)
-        log(state, f"✅ RAW AI Response {res}", "success")
+        #log(state, f"✅ RAW AI Response {res}", "success")
 
         log(state, "✅ Extracted offers from HTML", "success")
 

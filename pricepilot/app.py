@@ -87,15 +87,25 @@ st.markdown(
 st.markdown(
     """
     <style>
-    /* Remove top padding/margin */
-    .css-18e3th9 {  /* main app container */
-        padding-top: 1rem;  /* reduce from default ~5rem */
+    /* Remove top padding from main app container */
+    .css-18e3th9,  /* old Streamlit container */
+    .block-container {
+        padding-top: 0rem !important;
+        margin-top: 0rem !important;
     }
 
-    /* Optional: reduce spacing between header and first element */
-    .stApp > div:first-child {
-        margin-top: 0px;
-        padding-top: 0px;
+    /* Remove margin from header wrapper */
+    header, .stApp > header {
+        display: none !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* Remove main menu space */
+    #MainMenu {
+        visibility: hidden !important;
+        height: 0 !important;
     }
     </style>
     """,
@@ -151,69 +161,76 @@ def stop_agent():
 # -------------------------------
 current_product = st.session_state.agent_state.get('current_product', '').strip()
 
+# Navbar with Font Awesome icons
 st.markdown(
     f"""
+    <!-- Load Font Awesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
     <style>
+    /* Navbar Styling with fully rounded corners */
     .navbar {{
         position: sticky;
         top: 0;
-        background-color: #4B6CFE;
+        background: linear-gradient(90deg, #4B6CFE, #667EFF);
         color: white;
-        padding: 15px;
-        font-size: 24px;
+        padding: 18px 20px;
+        font-size: 26px;
+        font-weight: 600;
         text-align: center;
         z-index: 9999;
+        border-radius: 25px; /* fully rounded */
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        margin: 10px; /* spacing from edges */
     }}
-    .fancy-button {{
-        background-color:#4B6CFE;
-        color:white;
-        padding:10px 20px;
-        border-radius:8px;
-        border:none;
-        cursor:pointer;
-        font-size:16px;
-        margin-right:10px;
-    }}
-    .fancy-button.stop {{
-        background-color:#FF4B4B;
-    }}
-    .fancy-button:hover {{
-        opacity:0.8;
+    .navbar i {{
+        margin-right: 12px;
+        color: #FFD700; /* Gold accent for the icon */
     }}
     </style>
+
     <div class="navbar">
-        🛒 PricePilot{f' – {current_product}' if current_product else ''}
+        <i class="fas fa-tag"></i> PricePilot{f' – {current_product}' if current_product else ''}
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# ===============================
-# SEARCH & LAYOUT
-# ===============================
-left, right = st.columns([1, 1])
+# -------------------------------
+# LEFT PANEL - SEARCH & ACTIONS
+# -------------------------------
+left, right = st.columns([1,1])
 
 with left:
-    st.subheader("🔍 Search")
-    product = st.text_input("Enter product", "Samsung Galaxy S21 FE")
-    goal = ""  # Keep empty string for backward compatibility
-    user_codes = ""  # Keep empty string for backward compatibility
+    st.subheader("🔍 Search Product")
+
+    # Product input with placeholder and notes
+    product = st.text_input(
+        "Enter the product you want to track",
+        placeholder="e.g., Samsung Galaxy S21 FE, Apple iPhone 14 Pro",
+        help="Include brand, model, and variant for better accuracy"
+    )
+    st.markdown(
+        "<div class='input-note'>💡 Tip: Be as specific as possible. Include brand, model, storage, or variant.</div>",
+        unsafe_allow_html=True
+    )
+
+    goal = ""  # optional, can add in future
+    user_codes = ""  # optional coupon codes
 
     st.session_state.agent_state["current_product"] = product
 
-    
-    # Hidden Streamlit buttons for callback
+    # Action buttons in a row
     col1, col2 = st.columns(2)
     with col1:
-      
-       st.button("🟢 Start Agent", on_click=start_agent, key="start_agent")
-
+        st.button("🟢 Start Agent", on_click=start_agent, key="start_agent", 
+                  help="Click to start tracking prices for this product")
     with col2:
-        
-        st.button("⛔ Stop Agent", on_click=stop_agent, key="stop_agent")
+        st.button("⛔ Stop Agent", on_click=stop_agent, key="stop_agent",
+                  help="Click to stop the agent immediately")
 
     state = st.session_state.agent_state
-
     # ---------------------------
     # PRICE COMPARISON
     # ---------------------------
@@ -244,36 +261,7 @@ with left:
         label_to_offer = {}
         options = ["🚫 None"]
 
-        for o in offers.get("bank_offers", []):
-            label = f"🏦 {o.get('bank')} - {o.get('discount', '')}"
-            options.append(label)
-            label_to_offer[label] = o
-            st.markdown(
-                f"<div style='border-radius:10px;padding:10px;margin:5px;background-color:#d4edda'>"
-                f"<b>🏦 Bank Offer</b><br>{o.get('bank')} - {o.get('discount', '')}</div>",
-                unsafe_allow_html=True,
-            )
-
-        for o in offers.get("coupons", []):
-            label = f"🏷️ Code {o.get('code')} - {o.get('discount', '')}"
-            options.append(label)
-            label_to_offer[label] = o
-            st.markdown(
-                f"<div style='border-radius:10px;padding:10px;margin:5px;background-color:#d1ecf1'>"
-                f"<b>🏷️ Coupon</b><br>Code: {o.get('code')} - {o.get('discount', '')}</div>",
-                unsafe_allow_html=True,
-            )
-
-        for o in offers.get("exchange_offers", []):
-            label = f"🔄 Exchange - {o.get('discount', '')}"
-            options.append(label)
-            label_to_offer[label] = o
-            st.markdown(
-                f"<div style='border-radius:10px;padding:10px;margin:5px;background-color:#fff3cd'>"
-                f"<b>🔄 Exchange</b><br>{o.get('discount', '')}</div>",
-                unsafe_allow_html=True,
-            )
-
+        
         selected = st.radio("Select an offer", options, index=0)
 
         if selected != "🚫 None":
