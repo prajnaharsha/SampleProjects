@@ -26,7 +26,7 @@ DEFAULT_CODES = ["SAVE10", "SAVE20", "DEAL10"]
 def get_popular_sites(product,state):
    
     """
-    Ask AI to suggest top Indian e-commerce sites for a given product.
+    Ask AI to suggest top Indian e-commerce site Reliance Digital for a given product.
     Returns a dictionary {site_name: search_url_template}.
     """
     prompt = f"""
@@ -42,12 +42,10 @@ def get_popular_sites(product,state):
         "Reliance Digital": "https://www.reliancedigital.in/products?q={{q}}", 
         "Croma": "https://www.croma.com/searchB?q={{q}}%3Arelevance"
     }}
-
-    Return ONLY these 4 websites with their exact search URLs:
-    - Amazon
-    - Flipkart
+    Return ONLY Reliance Digital with their exact search URLs:
+    
     - Reliance Digital
-    - Croma
+   
 
     Use the exact URL patterns given. Do not infer or modify them.
 
@@ -364,158 +362,212 @@ def is_valid_discount(txt):
     txt = txt.lower()
     return bool(re.search(r"\d", txt))  # just needs a number
 
-def prepare_page_for_ai(page, state):
+
+def normalize(text):
+    if not text:
+        return ""
+    text = text.lower()
+    text = text.replace("₹", "")
+    text = text.replace(",", "")
+    text = text.replace("upto", "up to")
+    text = text.replace("  ", " ")
+    return text.strip()
+
+
+def is_duplicate(a, b):
+    return normalize(a) == normalize(b)
+
+
+def extract_json(text):
+    import re, json
     try:
-        # Wait for stability
-        page.wait_for_load_state("networkidle", timeout=5000)
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            return json.loads(match.group())
     except:
         pass
 
-    log(state, "🧠 Preparing page for AI...", "info")
-
-    # 🔽 Scroll to offers section
-    for _ in range(2):
-        page.mouse.wheel(0, 1200)
-        page.wait_for_timeout(1000)
-
-    # 🔘 Click "Available offers"
-    try:
-        btn = page.locator("text=Available offers").first
-        if btn.count() > 0:
-            btn.click()
-            page.wait_for_timeout(2000)
-            log(state, "✅ Opened 'Available offers'", "info")
-    except:
-        pass
-
-    # 🔘 Click "more offers"
-    try:
-        more = page.locator("text=more").first
-        if more.count() > 0:
-            more.click()
-            page.wait_for_timeout(2000)
-            log(state, "✅ Expanded more offers", "info")
-    except:
-        pass
-
-    # 🔽 Extra scroll (important for lazy load)
-    for _ in range(2):
-        page.mouse.wheel(0, 1000)
-        page.wait_for_timeout(1000)
-
-    page.wait_for_timeout(1500)
-
-def apply_coupons(page, state, codes):
+    return {
+        "bank_offers": [],
+        "coupons": [],
+        "exchange_offers": []
+    }
+def extract_offers_from_html(page, state,base_price):
 
     import re
-    import json
 
-    # -----------------------------
-    # 💰 STEP 1: Base price
-    # -----------------------------
-    base_price = state.get("current_price", 0)
-    state["base_price"] = base_price
+    log(state, "🌐 Extracting offers from page HTML...", "info")
 
-    # 🧠 STEP 2: Prepare page for AI (NEW)
-    prepare_page_for_ai(page, state)
+    # Step 1: Try expanding offer sections
+    keywords = ["offer", "bank", "discount", "more"]
 
-    # -----------------------------
-    # 🤖 STEP 3: AI extraction
-    # -----------------------------
+    for word in keywords:
+        try:
+            el = page.locator(f"text={word}").first
+            if el.count() > 0 and el.is_visible():
+                el.click()
+                page.wait_for_timeout(1500)
+                log(state, f"🔍 Clicked '{word}' to reveal offers", "info")
+                break
+        except:
+            continue
+
+    # Step 2: Get HTML
+    html = page.content()
+
+    # Step 3: Clean HTML → text
+    text = re.sub(r"<script.*?>.*?</script>", "", html, flags=re.DOTALL)
+    text = re.sub(r"<style.*?>.*?</style>", "", text, flags=re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+
+    #text = text[:8000]  # limit size
+
+    # Step 4: AI extraction
+    PROMPT = f"""
+    Extract ONLY real offers from this product page text.
+
+    {text}
+
+    Base product price: ₹{base_price}
+
+    Rules:
+    - DO NOT guess
+    - Only extract clearly visible offers
+    - Ignore EMI / financing
+
+    IMPORTANT:
+    - You MUST calculate final_price for every offer
+    - Use this formula:
+      final_price = base_price - discount
+    - If discount is "Up to ₹X", subtract X from base price
+    - If percentage discount, estimate using base price
+    - If exact value unclear, still give a reasonable approximation
+
+    Return JSON:
+    {{
+      "bank_offers": [
+        {{"bank": "", "discount": "", "final_price": ""}}
+      ],
+      "coupons": [
+        {{"code": "", "discount": "", "final_price": ""}}
+      ],
+      "exchange_offers": [
+        {{"discount": "", "final_price": ""}}
+      ]
+    }}
+    """
+
     try:
-        screenshot = page.screenshot(full_page=True)
-
-        result = ask_vision(
-            screenshot,
-            f"""
-            Extract all offers from this product page.
-
-            Base product price: ₹{base_price}
-
-            Categorize into:
-            - bank_offers
-            - coupons
-            - exchange_offers
-
-            IGNORE:
-            - EMI offers
-            - financing options
-
-            Rules:
-            - Include discount text
-            - ALSO estimate final price after applying the offer
-
-            Return JSON:
-            {{
-            "bank_offers": [{{"bank":"","discount":"","final_price":""}}],
-            "coupons": [{{"code":"","discount":"","final_price":""}}],
-            "exchange_offers": [{{"discount":"","final_price":""}}]
-            }}
-
-            IMPORTANT:
-            - Final price should be approximate
-            - Return ONLY JSON
-            """
+        res = client.models.generate_content(
+            model="models/gemini-2.5-flash",
+            contents=PROMPT
         )
+        
+        data = extract_json(res.text)
+        log(state, f"✅ RAW AI Response {res}", "success")
 
-        # DEBUG
-        log(state, f"🧠 AI RAW:\n{result}", "info")
+        log(state, "✅ Extracted offers from HTML", "success")
 
-        match = re.search(r"\{.*\}", result, re.DOTALL)
-        if not match:
-            log(state, "⚠️ No structured offers found", "warning")
-            return
-
-        data = json.loads(match.group())
+        return data
 
     except Exception as e:
-        log(state, f"⚠️ Offer extraction failed: {e}", "warning")
-        return
-      
+        log(state, f"⚠️ HTML extraction failed: {e}", "warning")
+        return None
+    
+def apply_coupons(page, state, codes):
 
-    # STEP 4: CLEAN AI EXTRACTED OFFERS
-    bank_offers = [b for b in data.get("bank_offers", []) if is_valid_discount(b.get("discount",""))]
-    coupons = [c for c in data.get("coupons", []) if is_valid_discount(c.get("discount",""))]
-    exchange_offers = [e for e in data.get("exchange_offers", []) if is_valid_discount(e.get("discount",""))]
-
+    base_price = state.get("current_price", 0)
+    product = state.get("product", "product")
+    site = state.get("best_site", "Amazon")
 
     # -----------------------------
-    # 🧠 STORE OFFERS (NEW)
+    # 🥇 STEP 1: Try HTML extraction
+    # -----------------------------
+    data = extract_offers_from_html(page, state,base_price)
+
+    # Check if valid offers found
+    def has_offers(d):
+        if not d:
+            return False
+        return any([
+            d.get("bank_offers"),
+            d.get("coupons"),
+            d.get("exchange_offers")
+        ])
+
+    # -----------------------------
+    # 🥈 STEP 2: Fallback to AI guess
+    # -----------------------------
+    if not has_offers(data):
+
+        log(state, "⚠️ No real offers found → using AI suggestions", "warning")
+
+        PROMPT = f"""
+        Suggest realistic offers for:
+
+        Product: {product}
+        Platform: {site}
+        Price: ₹{base_price}
+
+        Include:
+        - Bank offers (HDFC, ICICI, SBI, Axis)
+        - Coupons
+        - Exchange offers
+
+        Rules:
+        - Keep it realistic
+        - No extreme discounts
+        - Estimate final price
+
+        Return ONLY JSON:
+        {{
+          "bank_offers": [
+            {{"bank": "", "discount": "", "final_price": ""}}
+          ],
+          "coupons": [
+            {{"code": "", "discount": "", "final_price": ""}}
+          ],
+          "exchange_offers": [
+            {{"discount": "", "final_price": ""}}
+          ]
+        }}
+        """
+
+        try:
+            res = client.models.generate_content(
+                model="models/gemini-2.5-flash",
+                contents=PROMPT
+            )
+
+            data = extract_json(res.text)
+
+            log(state, "🤖 AI generated fallback offers", "info")
+
+        except Exception as e:
+            log(state, f"AI failed: {e}", "error")
+            data = {
+                "bank_offers": [],
+                "coupons": [],
+                "exchange_offers": []
+            }
+
+    # -----------------------------
+    # 🧹 CLEAN + STORE
     # -----------------------------
     state["offers"] = {
-        "bank_offers": bank_offers,
-        "coupons": coupons,
-        "exchange_offers": exchange_offers
+        "bank_offers": [b for b in data.get("bank_offers", []) if is_valid_discount(b.get("discount",""))],
+        "coupons": [c for c in data.get("coupons", []) if is_valid_discount(c.get("discount",""))],
+        "exchange_offers": [e for e in data.get("exchange_offers", []) if is_valid_discount(e.get("discount",""))]
     }
-    # -----------------------------
-    # 🧾 STEP 5: LOG CLEAN OUTPUT
-    # -----------------------------
-    if bank_offers:
-        log(state, f"🏦 Found {len(bank_offers)} bank offer(s)", "success")
-        for b in bank_offers:
-            log(state, f"   • {b.get('bank')} → {b.get('discount')}", "info")
-    else:
-        log(state, "ℹ️ No bank offers found", "info")
 
-    if coupons:
-        log(state, f"🎟 Found {len(coupons)} coupon(s)", "success")
-        for c in coupons:
-            log(state, f"   • {c.get('code')} → {c.get('discount')}", "info")
-    else:
-        log(state, "ℹ️ No coupons found", "info")
-
-    if exchange_offers:
-        log(state, f"🔄 Found {len(exchange_offers)} exchange offer(s)", "success")
-        for e in exchange_offers:
-            log(state, f"   • {e.get('discount')}", "info")
-    else:
-        log(state, "ℹ️ No exchange offers found", "info")    
-    
-
+    log(state, "🎯 Final offers ready", "success")
 # -----------------------------
 # MAIN RUN
 # -----------------------------
 def run(product, goal, state, extra_codes=None):
+
+   
 
     codes = (extra_codes or []) + DEFAULT_CODES
 
@@ -532,6 +584,8 @@ def run(product, goal, state, extra_codes=None):
         page = browser.new_page()
 
         state["agent_running"] = True
+
+        state["product"] = product
 
         try:
             url = compare_prices(product, page, state)
