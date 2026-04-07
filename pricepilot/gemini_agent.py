@@ -44,9 +44,8 @@ def get_popular_sites(product,state):
         "Croma": "https://www.croma.com/searchB?q={{q}}%3Arelevance"
     }}
 
-    Return ONLY these 4 websites with their exact search URLs:
-    - Amazon
-    - Flipkart
+    Return ONLY these 2 websites with their exact search URLs:
+  
     - Reliance Digital
     - Croma
 
@@ -80,10 +79,8 @@ def get_popular_sites(product,state):
         else:
             raise ValueError("No JSON found in Gemini response")
 
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        log(state, f"⚠️ Failed to fetch popular sites dynamically: {e}\n{tb}", "warning")
+    except Exception  :
+        log(state, "⚠️ AI could not fetch the list of popular sites dynamically — quota has been exceeded.", "warning")
         return {}  # return empty dict
     
 # -----------------------------
@@ -296,7 +293,6 @@ def get_price(product, page, state, site):
 # -----------------------------
 def compare_prices(product, page, state):
 
-    #Get sites dynamically per product
     COMPARE_SITES = get_popular_sites(product, state)
     if not COMPARE_SITES:
         log(state, "⚠️ Using fallback hardcoded sites", "info")
@@ -312,21 +308,21 @@ def compare_prices(product, page, state):
             log(state, f"🔎 Checking {site}...")
             page.goto(url, timeout=15000)
             page.wait_for_timeout(2000)
-            
-            # Scroll to load lazy content
+
             page.mouse.wheel(0, 300)
             page.wait_for_timeout(700)
 
-            # Extract product URL from DOM
             product_url = extract_product_url_from_dom(page, state, site)
-            
-            # Get price
             price = get_price(product, page, state, site)
 
             if not price:
                 continue
 
-            results[site] = {"price": price, "search_url": url, "product_url": product_url}
+            results[site] = {
+                "price": price,
+                "search_url": url,
+                "product_url": product_url
+            }
 
         except Exception as e:
             log(state, f"{site} failed: {e}", "warning")
@@ -334,22 +330,27 @@ def compare_prices(product, page, state):
     if not results:
         return None
 
-    best = min(results, key=lambda x: results[x]["price"])
+    # 🔥 NEW: pick top 2 cheapest
+    sorted_sites = sorted(results.items(), key=lambda x: x[1]["price"])
+    top2 = sorted_sites[:2]
 
-    state["price_comparison"] = results
-    state["best_site"] = best
-    state["current_price"] = results[best]["price"]
-    state["best_product_url"] = results[best].get("product_url")
-    
-    if state["best_product_url"]:
-        log(state, f"🔗 Found product URL for {best}:{state['best_product_url']}", "info")
-    else:
-        log(state, f"⚠️ No product URL found for {best}, will use search URL", "warning")
+    state["top2_sites"] = {
+        site: data for site, data in top2
+    }
 
-    log(state, f"🏆 Cheapest: {best}", "success")
+    # Prepare structure
+    state["selected_sites"] = {}
+    for site, data in state["top2_sites"].items():
+        state["selected_sites"][site] = {
+            "price": data["price"],
+            "product_url": data.get("product_url"),
+            "search_url": data.get("search_url"),
+            "offers": {}
+        }
 
-    # Return product URL if found, otherwise return search URL
-    return results[best]["product_url"] if results[best]["product_url"] else results[best]["search_url"]
+    log(state, f"🏆 Top 2: {', '.join(state['top2_sites'].keys())}", "success")
+
+    return True
 
 # -----------------------------
 # NAVIGATE
@@ -362,9 +363,19 @@ def navigate(page, url, state, site):
         log(state, f"Navigation failed: {e}", "error")   
 
 
+def extract_number(text):
+    try:
+        match = re.search(r"\d[\d,\.]*", str(text))
+        if not match:
+            return None
+        return float(match.group().replace(",", ""))
+    except:
+        return None
+
+
 def is_valid_discount(txt):
-    txt = txt.lower()
-    return bool(re.search(r"\d", txt))  # just needs a number
+    value = extract_number(txt)
+    return value is not None and value > 0
 
 
 def normalize(text):
@@ -383,22 +394,36 @@ def is_duplicate(a, b):
 
 
 def extract_json(text):
-    import re, json
+    import json
+
     try:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-    except:
-        pass
+        # Remove markdown wrappers
+        text = text.replace("```json", "").replace("```", "").strip()
+
+        # Extract ONLY valid JSON block
+        start = text.find("{")
+        end = text.rfind("}")
+
+        if start != -1 and end != -1:
+            json_str = text[start:end+1]
+            return json.loads(json_str)
+
+    except Exception as e:
+        print("JSON parse error:", e)
 
     return {
         "bank_offers": [],
         "coupons": [],
         "exchange_offers": []
     }
-def extract_offers_from_html(page, state,base_price):
 
-    import re
+def extract_offers_from_html(page, state,base_price):
+    def get_raw_text(res):
+        try:
+            return res.candidates[0].content.parts[0].text
+        except:
+            return res.text  # fallback
+        import re
 
     log(state, "🌐 Extracting offers from page HTML...", "info")
 
@@ -465,18 +490,21 @@ def extract_offers_from_html(page, state,base_price):
     try:
         res = client.models.generate_content(
             model="models/gemini-2.5-flash",
-            contents=PROMPT
+            contents=PROMPT,
+            config={"response_mime_type": "application/json"}
         )
         
-        data = extract_json(res.text)
-        #log(state, f"✅ RAW AI Response {res}", "success")
+        data = json.loads(res.text)
 
-        log(state, "✅ Extracted offers from HTML", "success")
+        log(state, f"✅ RAW AI Response: {res.text}", "success")        
 
         return data
 
     except Exception as e:
-        log(state, f"⚠️ HTML extraction failed: {e}", "warning")
+        if "429" in str(e):
+            log(state, "⚠️ HTML extraction failed: AI limit reached", "warning")
+        else:
+            log(state, "⚠️ HTML extraction failed: Could not fetch data from AI", "warning")
         return None
     
 def apply_coupons(page, state, codes):
@@ -501,86 +529,121 @@ def apply_coupons(page, state, codes):
         ])
 
     # -----------------------------
-    # 🥈 STEP 2: Fallback to AI guess
+    # 🥈 NO  OFFERS
     # -----------------------------
     if not has_offers(data):
-
-        log(state, "⚠️ No real offers found → using AI suggestions", "warning")
-
-        PROMPT = f"""
-        Suggest realistic offers for:
-
-        Product: {product}
-        Platform: {site}
-        Price: ₹{base_price}
-
-        Include:
-        - Bank offers (HDFC, ICICI, SBI, Axis)
-        - Coupons
-        - Exchange offers
-
-        Rules:
-        - Keep it realistic
-        - No extreme discounts
-        - Estimate final price
-
-        Return ONLY JSON:
-        {{
-          "bank_offers": [
-            {{"bank": "", "discount": "", "final_price": ""}}
-          ],
-          "coupons": [
-            {{"code": "", "discount": "", "final_price": ""}}
-          ],
-          "exchange_offers": [
-            {{"discount": "", "final_price": ""}}
-          ]
-        }}
-        """
-
-        try:
-            res = client.models.generate_content(
-                model="models/gemini-2.5-flash",
-                contents=PROMPT
-            )
-
-            data = extract_json(res.text)
-
-            log(state, "🤖 AI generated fallback offers", "info")
-
-        except Exception as e:
-            log(state, f"AI failed: {e}", "error")
-            data = {
-                "bank_offers": [],
-                "coupons": [],
-                "exchange_offers": []
-            }
-
+        log(state, "ℹ️ No offers found on page", "info")
+        data = {
+            "bank_offers": [],
+            "coupons": [],
+            "exchange_offers": []
+        }  
+        
+    #log(state, f"🧪 Raw AI offers: {json.dumps(data)}", "info")
     # -----------------------------
     # 🧹 CLEAN + STORE
     # -----------------------------
     state["offers"] = {
-        "bank_offers": [b for b in data.get("bank_offers", []) if is_valid_discount(b.get("discount",""))],
-        "coupons": [c for c in data.get("coupons", []) if is_valid_discount(c.get("discount",""))],
-        "exchange_offers": [e for e in data.get("exchange_offers", []) if is_valid_discount(e.get("discount",""))]
+        "bank_offers": [
+            b for b in data.get("bank_offers", [])
+            if is_valid_discount(b.get("discount"))
+            and is_realistic_price(b.get("final_price"), base_price)
+        ],
+        "coupons": [
+            c for c in data.get("coupons", [])
+            if is_valid_discount(c.get("discount"))
+            and is_realistic_price(c.get("final_price"), base_price)
+        ],
+        "exchange_offers": [
+            e for e in data.get("exchange_offers", [])
+            if is_valid_discount(e.get("discount"))
+            and is_realistic_price(e.get("final_price"), base_price)
+        ]
     }
 
     log(state, "🎯 Final offers ready", "success")
+    log(state, f"📦 Final offers: {json.dumps(state['offers'], indent=2)}", "info")
+
+
+def is_realistic_price(final_price, base_price):
+    val = extract_number(final_price)
+    if val is None:
+        return False
+    return 0 < val <= base_price
+def generate_insight(state):
+    try:
+        sites = state.get("selected_sites", {})
+
+        if not sites or len(sites) < 2:
+            return
+
+        summary = {
+            "product": state.get("product"),
+            "sites": {}
+        }
+
+        for site, data in sites.items():
+            summary["sites"][site] = {
+                "base_price": data.get("price"),
+                "offers": data.get("offers", {})
+            }
+
+        PROMPT = f"""
+        You are a smart shopping assistant.
+
+        Compare these 2 deals AND give product insight.
+
+        Data:
+        {json.dumps(summary, indent=2)}
+
+        Instructions:
+        1. Deal Insight:
+        - Which site is better and why
+        - Consider final price, reliability, realism of offers
+
+        2. Product Insight:
+        - Is this product generally good?
+        - Any known pros/cons
+        - Who should buy it
+
+        Rules:
+        - Max 6-7 lines total
+        - Be crisp and practical
+        - No fluff
+
+        Output format:
+
+        Deal Insight:
+        ...
+
+        Product Insight:
+        ...
+        """
+
+        res = client.models.generate_content(
+            model="models/gemini-2.5-flash",
+            contents=PROMPT
+        )
+
+        state["insight"] = res.text.strip()
+
+        log(state, "🧠 Insight generated", "success")
+
+    except Exception as e:
+        if "429" in str(e):
+            log(state, "⚠️ Insight failed: AI limit reached", "warning")
+        else:
+            log(state, "⚠️ Insight failed: Could not fetch data from AI", "warning")
+
 # -----------------------------
 # MAIN RUN
 # -----------------------------
 def run(product, goal, state, extra_codes=None):
 
-   
-
     codes = (extra_codes or []) + DEFAULT_CODES
 
-    import asyncio
-    import sys
-
-    
     with sync_playwright() as p:
-        
+
         browser = p.chromium.launch_persistent_context(
             user_data_dir="user_data",
             headless=False
@@ -588,29 +651,41 @@ def run(product, goal, state, extra_codes=None):
         page = browser.new_page()
 
         state["agent_running"] = True
-
         state["product"] = product
 
         try:
-            url = compare_prices(product, page, state)
+            success = compare_prices(product, page, state)
 
-            if not url:
+            if not success:
                 log(state, "No prices found", "error")
                 return
 
-            navigate(page, url, state, state["best_site"])
+            # 🔥 NEW: process BOTH sites
+            for site, data in state["top2_sites"].items():
 
-            apply_coupons(page, state, codes)
+                url = data.get("product_url") or data.get("search_url")
 
-            log(
-                state,
-                f"💰 Final Price: ₹{state['current_price']}",
-                "success"
-            )
+                log(state, f"🌐 Processing {site}", "info")
+
+                navigate(page, url, state, site)
+
+                # reuse existing logic
+                state["current_price"] = data["price"]
+                state["best_site"] = site
+
+                apply_coupons(page, state, codes)
+
+                # store offers per site
+                state["selected_sites"][site]["offers"] = state["offers"]
+           
 
         except Exception as e:
             log(state, f"Error: {e}", "error")
 
+        try:
+            generate_insight(state)
+        except Exception:
+            log(state, "⚠️ Insight unavailable (quota reached)", "warning")
+
         finally:
             state["agent_running"] = False
-            #browser.close()

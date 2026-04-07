@@ -28,89 +28,12 @@ if "agent_state" not in st.session_state:
         "price_comparison": {},
         "offers": {},
         "current_product": "",
+        "selected_sites": {}  # 🔥 NEW
     }
 
 if "agent_thread" not in st.session_state:
     st.session_state.agent_thread = None
 
-# -------------------------------
-# PAGE STYLING
-# -------------------------------
-st.markdown(
-    """
-    <style>
-    /* Page background */
-    .stApp {
-        background-color: #f0f0f0;  /* light gray */
-    }
-
-    /* Make text input areas white */
-    .stTextInput>div>div>input {
-        background-color: white !important;
-        color: black;
-    }
-
-    /* Optional: make text area white too */
-    .stTextArea>div>div>textarea {
-        background-color: white !important;
-        color: black;
-    }
-
-    /* Optional: make selectbox white */
-    .stSelectbox>div>div>div>select {
-        background-color: white !important;
-        color: black;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# -------------------------------
-# HIDE STREAMLIT MENU / DEPLOY BUTTON
-# -------------------------------
-st.markdown(
-    """
-    <style>
-    /* Hide top-right menu including Deploy button */
-    #MainMenu {visibility: hidden !important;}
-
-    /* Hide top header bar completely */
-    header {visibility: hidden !important; height: 0px;}
-
-    /* Hide footer (optional) */
-    footer {visibility: hidden !important;}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-st.markdown(
-    """
-    <style>
-    /* Remove top padding from main app container */
-    .css-18e3th9,  /* old Streamlit container */
-    .block-container {
-        padding-top: 0rem !important;
-        margin-top: 0rem !important;
-    }
-
-    /* Remove margin from header wrapper */
-    header, .stApp > header {
-        display: none !important;
-        height: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-
-    /* Remove main menu space */
-    #MainMenu {
-        visibility: hidden !important;
-        height: 0 !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
@@ -130,24 +53,16 @@ def to_number(price):
 def start_agent():
     if st.session_state.agent_state["agent_running"]:
         return
+
     st.session_state.agent_state["action_log"] = []
     st.session_state.agent_state["agent_running"] = True
-    st.session_state.agent_state["approval_pending"] = False
-    st.session_state.agent_state["approval_response"] = None
-    st.session_state.agent_state["best_code"] = None
+    st.session_state.agent_state["selected_sites"] = {}
 
     extra_codes = []
-    if user_codes.strip():
-        extra_codes = [c.strip() for c in user_codes.split(",") if c.strip()]
 
     thread = threading.Thread(
         target=agent.run,
-        args=(
-            product,
-            goal,
-            st.session_state.agent_state,
-            extra_codes,
-        ),
+        args=(product, "", st.session_state.agent_state, extra_codes),
         daemon=True,
     )
     thread.start()
@@ -157,141 +72,228 @@ def stop_agent():
     st.session_state.agent_state["agent_running"] = False
 
 # -------------------------------
-# NAVBAR (Sticky Top, no rounded corners)
+# NAVBAR
 # -------------------------------
 current_product = st.session_state.agent_state.get('current_product', '').strip()
 
-# Navbar with Font Awesome icons
 st.markdown(
     f"""
-    <!-- Load Font Awesome for icons -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-
     <style>
-    /* Navbar Styling with fully rounded corners */
     .navbar {{
         position: sticky;
         top: 0;
         background: linear-gradient(90deg, #4B6CFE, #667EFF);
         color: white;
-        padding: 18px 20px;
+        padding: 15px 20px;
         font-size: 26px;
-        font-weight: 600;
-        text-align: center;
-        z-index: 9999;
-        border-radius: 25px; /* fully rounded */
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        margin: 10px; /* spacing from edges */
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-radius: 10px;
+        margin-bottom: 15px;
     }}
-    .navbar i {{
-        margin-right: 12px;
-        color: #FFD700; /* Gold accent for the icon */
+    .product {{
+        font-size: 14px;
+        color: #b0d4ff;
+        font-weight: normal;
+        max-width: 50%;
+        text-align: right;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }}
     </style>
 
     <div class="navbar">
-        <i class="fas fa-tag"></i> PricePilot{f' – {current_product}' if current_product else ''}
+        <div>PricePilot</div>
+        <div class="product">{current_product if current_product else ""}</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# -------------------------------
-# LEFT PANEL - SEARCH & ACTIONS
-# -------------------------------
-left, right = st.columns([1,1])
 
+# -------------------------------
+# LAYOUT
+# -------------------------------
+left, right = st.columns([1, 1])
+
+# -------------------------------
+# LEFT PANEL
+# -------------------------------
 with left:
-    st.subheader("🔍 Search Product")
+    st.subheader("🛒 Product Search")
 
-    # Product input with placeholder and notes
     product = st.text_input(
-        "Enter the product you want to track",
-        placeholder="e.g., Samsung Galaxy S21 FE, Apple iPhone 14 Pro",
-        help="Include brand, model, and variant for better accuracy"
+        "Enter product",
+        placeholder="e.g., Redmi 15C 5G 128 GB, 6 GB RAM, Mobile Phone"
     )
+
     st.markdown(
-        "<div class='input-note'>💡 Tip: Be as specific as possible. Include brand, model, storage, or variant.</div>",
+        "<div style='font-size:13px; color:gray;'>💡 Tip: Be as specific as possible. Include brand, model, storage, or variant.</div>",
         unsafe_allow_html=True
     )
 
-    goal = ""  # optional, can add in future
-    user_codes = ""  # optional coupon codes
-
+    st.markdown("<br>", unsafe_allow_html=True)
+    
     st.session_state.agent_state["current_product"] = product
 
-    # Action buttons in a row
     col1, col2 = st.columns(2)
     with col1:
-        st.button("🟢 Start Agent", on_click=start_agent, key="start_agent", 
-                  help="Click to start tracking prices for this product")
+        st.button("🟢 Start Search Assistant", on_click=start_agent, use_container_width=True)
+
     with col2:
-        st.button("⛔ Stop Agent", on_click=stop_agent, key="stop_agent",
-                  help="Click to stop the agent immediately")
-
+        st.button("⛔ Stop Search Assistant", on_click=stop_agent, use_container_width=True)
+    
     state = st.session_state.agent_state
-    # ---------------------------
-    # PRICE COMPARISON
-    # ---------------------------
-    if state.get("price_comparison"):
-        st.markdown("### 🏷️ Price Comparison")
-        for site, data in state["price_comparison"].items():
-            st.metric(label=site, value=f"₹{data['price']:,.0f}")
 
     # ---------------------------
-    # PRICE OVERVIEW
+    # 🔥 NEW: SIDE-BY-SIDE DEALS
     # ---------------------------
-    if state.get("original_price") and state.get("current_price"):
-        st.markdown("### 💸 Price Overview")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Original Price", f"₹{state['original_price']:,.0f}", delta_color="off")
-        with col2:
-            st.metric("Current Price", f"₹{state['current_price']:,.0f}", delta_color="normal")
+    sites_data = state.get("selected_sites", {})
 
-    # ---------------------------
-    # OFFERS - COLORFUL CARDS
-    # ---------------------------
-    offers = state.get("offers", {})
-    all_offers = offers.get("bank_offers", []) + offers.get("coupons", []) + offers.get("exchange_offers", [])
+    if sites_data:
+        st.markdown("## Compare Deals")
 
-    if all_offers:
-        st.markdown("### 🎁 Available Offers")
-        label_to_offer = {}
-        options = ["🚫 None"]
+        selected_site = st.radio(
+            "Choose website",
+            list(sites_data.keys()),
+            horizontal=True
+        )
 
-        
-        selected = st.radio("Select an offer", options, index=0)
+        cols = st.columns(len(sites_data))
 
-        if selected != "🚫 None":
-            chosen_offer = label_to_offer[selected]
-            final_price = to_number(chosen_offer.get("final_price", state['current_price']))
-            st.markdown(f"<h3 style='color:green'>💰 Final Price After Offer: ₹{final_price:,.0f}</h3>", unsafe_allow_html=True)
+        for i, (site, data) in enumerate(sites_data.items()):
+            with cols[i]:
+                st.markdown(f"### 🛍️ {site}")
+
+                base_price = data["price"]
+                st.markdown(f"💰 **Base Price:** ₹{base_price:,.0f}")
+
+                offers = data.get("offers", {})
+
+                all_offers = (
+                    offers.get("bank_offers", []) +
+                    offers.get("coupons", []) +
+                    offers.get("exchange_offers", [])
+                )
+
+                if all_offers:
+                    st.markdown("#### 🎁 Offers")
+
+                    all_offers = sorted(
+                        all_offers,
+                        key=lambda x: to_number(x.get("final_price", base_price))
+                    )
+
+                    for offer in all_offers:
+                        discount = offer.get("discount", "")
+                        final_price = to_number(offer.get("final_price", base_price))
+
+                        if "bank" in offer:
+                            label = f"🏦 {offer.get('bank')}"
+                        elif "code" in offer:
+                            label = f"🏷️ {offer.get('code')}"
+                        else:
+                            label = "🔁 Exchange"
+
+                        st.markdown(
+                            f"""
+                            <div style="
+                                background-color:#f8f9fa;
+                                padding:10px;
+                                border-radius:10px;
+                                margin-bottom:8px;
+                            ">
+                                <b>{label}</b><br>
+                                Save ₹{discount}<br>
+                                <span style="color:green; font-weight:bold;">
+                                    Final: ₹{final_price:,.0f}
+                                </span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                else:
+                    st.info("No offers available")
+
+                if site == selected_site:
+                    st.markdown(
+                        "<div style='color:green; font-weight:bold;'>✅ Selected</div>",
+                        unsafe_allow_html=True
+                    )
+
+        # ---------------------------
+        # 🛒 BUY BUTTON
+        # ---------------------------
+        selected_data = sites_data.get(selected_site, {})
+        buy_url = selected_data.get("product_url") or selected_data.get("search_url")
+
+        st.markdown("---")
+
+        if buy_url:
+            st.link_button(
+                f"🛒 Buy from {selected_site}",
+                buy_url
+            )
         else:
-            st.markdown(f"<h3 style='color:blue'>💰 Final Price: ₹{state['current_price']:,.0f}</h3>", unsafe_allow_html=True)
+            st.warning("No product link available")
 
-# ===============================
-# RIGHT SIDE - PROGRESS + LIVE LOGS
-# ===============================
+# -------------------------------
+# RIGHT PANEL
+# -------------------------------
 with right:
     if state.get("agent_running"):
-        st.subheader("🤖 Agent Progress")
+        st.subheader("Assistant Progress")
         progress = min(len(state["action_log"]), 10) * 10
         st.progress(progress)
 
     st.subheader("📜 Live Logs")
-    with st.expander("Show/Hide Logs", expanded=True):
+
+    
+    # 🔥 Force re-render when insight arrives
+    expander_key = "logs_open" if not state.get("insight") else "logs_closed"
+    with st.expander("Logs", expanded=not state.get("insight"), key=expander_key):
+       
+    
         for log in state["action_log"]:
-            msg, typ = log.get("msg", ""), log.get("type", "info")
-            if typ == "success":
-                st.success(msg)
-            elif typ == "warning":
-                st.warning(msg)
-            elif typ == "error":
-                st.error(msg)
-            else:
-                st.info(msg)
+            msg = log.get("msg", "")
+            typ = log.get("type", "info")
+            
+            # Map type to color
+            color = {
+                "info": "#0077CC",      # Darker Blue
+                "success": "#228B22",   # Forest Green
+                "warning": "#FF8C00",   # Dark Orange
+                "error": "#B22222"      # Firebrick Red
+            }.get(typ, "#000000")       # default black
+            # Render inline like a terminal
+            st.markdown(
+                f'<span style="color:{color}; font-family:monospace;">[12:34:56] {typ.upper():7} {msg}</span><br>', 
+                unsafe_allow_html=True
+            )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    # ---------------------------
+    # 🧠 AI INSIGHT
+    # ---------------------------
+    if state.get("insight"):
+        st.markdown("## 🧠 Smart Recommendation")
+
+        st.markdown(
+            f"""
+            <div style="
+                background-color:#eef4ff;
+                padding:15px;
+                border-radius:12px;
+                border-left:5px solid #4B6CFE;
+                font-size:16px;
+            ">
+                {state['insight']}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 # -------------------------------
 # AUTO REFRESH
@@ -299,3 +301,5 @@ with right:
 if state.get("agent_running"):
     time.sleep(1)
     st.rerun()
+
+
