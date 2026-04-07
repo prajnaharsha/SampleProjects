@@ -38,7 +38,51 @@ if "agent_thread" not in st.session_state:
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(page_title="PricePilot", layout="wide")
+# -------------------------------
+# HIDE STREAMLIT MENU / DEPLOY BUTTON
+# -------------------------------
+st.markdown(
+    """
+    <style>
+    /* Hide top-right menu including Deploy button */
+    #MainMenu {visibility: hidden !important;}
 
+    /* Hide top header bar completely */
+    header {visibility: hidden !important; height: 0px;}
+
+    /* Hide footer (optional) */
+    footer {visibility: hidden !important;}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+st.markdown(
+    """
+    <style>
+    /* Remove top padding from main app container */
+    .css-18e3th9,  /* old Streamlit container */
+    .block-container {
+        padding-top: 0rem !important;
+        margin-top: 0rem !important;
+    }
+
+    /* Remove margin from header wrapper */
+    header, .stApp > header {
+        display: none !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* Remove main menu space */
+    #MainMenu {
+        visibility: hidden !important;
+        height: 0 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 # -------------------------------
 # HELPER FUNCTIONS
 # -------------------------------
@@ -78,6 +122,8 @@ current_product = st.session_state.agent_state.get('current_product', '').strip(
 
 st.markdown(
     f"""
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
     <style>
     .navbar {{
         position: sticky;
@@ -94,7 +140,7 @@ st.markdown(
     }}
     .product {{
         font-size: 14px;
-        color: #b0d4ff;
+        color: #a0ffff;
         font-weight: normal;
         max-width: 50%;
         text-align: right;
@@ -105,9 +151,11 @@ st.markdown(
     </style>
 
     <div class="navbar">
-        <div>PricePilot</div>
+        <div><i class="fas fa-tag"></i> PricePilot</div>
         <div class="product">{current_product if current_product else ""}</div>
     </div>
+
+     
     """,
     unsafe_allow_html=True,
 )
@@ -125,8 +173,9 @@ with left:
     st.subheader("🛒 Product Search")
 
     product = st.text_input(
-        "Enter product",
-        placeholder="e.g., Redmi 15C 5G 128 GB, 6 GB RAM, Mobile Phone"
+        "Enter the product you want to track",
+        placeholder="e.g., Redmi 15C 5G 128 GB, 6 GB RAM, Mobile Phone",
+        help="Include brand, model, and variant for better accuracy"
     )
 
     st.markdown(
@@ -230,12 +279,44 @@ with left:
         buy_url = selected_data.get("product_url") or selected_data.get("search_url")
 
         st.markdown("---")
-
+        
         if buy_url:
-            st.link_button(
-                f"🛒 Buy from {selected_site}",
-                buy_url
-            )
+            st.markdown(f"""
+                        
+            <!-- Load Font Awesome -->
+            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+            <style>
+            .buy-button {{
+                background: linear-gradient(90deg, #4B6CFE, #667EFF);
+                color: white !important;
+                padding: 10px 25px;
+                border-radius: 10px;
+                font-size: 16px;
+                font-weight: 600;
+                text-decoration: none; /* This removes the underline */
+                display: inline-block;
+                transition: 0.2s all ease;
+            }}
+            .buy-button, 
+            .buy-button:link, 
+            .buy-button:visited, 
+            .buy-button:hover, 
+            .buy-button:active, 
+            .buy-button:focus {{
+                text-decoration: none !important;
+                color: white !important;
+            }}
+            .buy-button:hover {{
+                opacity: 0.85;
+                transform: translateY(-1px);
+            }}
+            </style>
+
+            <a class="buy-button" href="{buy_url}" target="_blank">
+                <i class="fas fa-cart-shopping"></i> Buy from {selected_site}
+            </a>
+            """, unsafe_allow_html=True)
         else:
             st.warning("No product link available")
 
