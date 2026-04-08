@@ -31,7 +31,7 @@ def get_popular_sites(product,state):
     Returns a dictionary {site_name: search_url_template}.
     """
     prompt = f"""
-    Suggest 3 most popular Indian e-commerce websites for buying '{product}'.
+    Suggest 4 most popular Indian e-commerce websites for buying '{product}'.
     Give response as JSON in the format:
     {{
         "site_name": "search_url_with_placeholder_for_query"
@@ -44,13 +44,23 @@ def get_popular_sites(product,state):
         "Croma": "https://www.croma.com/searchB?q={{q}}%3Arelevance"
     }}
 
-    Return ONLY these 2 websites with their exact search URLs:
-  
-    - Reliance Digital
-    - Croma
+    IMPORTANT:
+    - If the site is one of these, you MUST use the EXACT URL pattern:
 
-    Use the exact URL patterns given. Do not infer or modify them.
+        Amazon: https://www.amazon.in/s?k={{q}}
+        Flipkart: https://www.flipkart.com/search?q={{q}}
+        Reliance Digital: https://www.reliancedigital.in/products?q={{q}}
+        Croma: https://www.croma.com/searchB?q={{q}}%3Arelevance
+        Myntra: https://www.myntra.com/{{q}}
+        Ajio: https://www.ajio.com/search/?text={{q}}
+        BigBasket: https://www.bigbasket.com/ps/?q={{q}}
+        Blinkit: https://blinkit.com/s/?q={{q}}
+        Zepto: https://www.zeptonow.com/search?query={{q}}
+        JioMart: https://www.jiomart.com/search/{{q}}
+    - If you choose ANY of the above sites, DO NOT modify their URL format
+    - For other websites, generate a valid search URL using {{q}}
 
+    EXLCDUE Flipkart
 
     """
 
@@ -59,7 +69,7 @@ def get_popular_sites(product,state):
 
     try:
         res = client.models.generate_content(
-            model="models/gemini-2.5-flash",
+            model="models/gemini-2.5-flash-lite",
             contents=prompt  # just a string
         )
         #res = client.models.generate_content(
@@ -79,8 +89,11 @@ def get_popular_sites(product,state):
         else:
             raise ValueError("No JSON found in Gemini response")
 
-    except Exception  :
-        log(state, "⚠️ AI could not fetch the list of popular sites dynamically — quota has been exceeded.", "warning")
+    except Exception as e:
+        if "429" in str(e):
+            log(state, "⚠️ Popular sites unavailable: AI limit reached", "warning")
+        else:
+            log(state, f"⚠️ Popular sites unavailable: {str(e)}", "warning")
         return {}  # return empty dict
     
 # -----------------------------
@@ -117,16 +130,23 @@ def ask_vision(image, prompt):
 def extract_price(page):
     # Wait for page to stabilize
     try:
+        
         page.wait_for_load_state("networkidle", timeout=5000)
+        page.wait_for_timeout(2000)
+
+        # 👇 AND THIS (VERY IMPORTANT)
+        page.mouse.wheel(0, 800)
+        page.wait_for_timeout(1500)
     except:
         pass    
    
 
     selectors = [
         # Flipkart (product page)
-         "div._30jeq3", 
-        "div[class*='30jeq3']",
-        "div[class*='price']",
+        "div._30jeq3._16Jk6d",
+        "div._30jeq3",
+        "div.Nx9bqj",
+        "div[class*='Nx9bqj']",
 
         # Amazon
         "span.a-price-whole",
@@ -144,10 +164,38 @@ def extract_price(page):
         "div.price-section span",
         "div.product-price span",
 
+        # -----------------------------
+        # JioMart
+        # -----------------------------
+        "span.jm-price",
+        "div.plp-card-details-price",
+        "div[class*='price'] span",
+
+        # -----------------------------
+        # Myntra
+        # -----------------------------
+        "span.pdp-price",
+        "span.pdp-discounted-price",
+        "div.product-price span",
+
+        # -----------------------------
+        # Ajio
+        # -----------------------------
+        "span.price",
+        "div.price strong",
+        "span.discounted-price",
+
+        "span.DiscountedPrice___StyledSpan2-sc-1qdt4xj-1",
+        "span[class*='DiscountedPrice']",
+        "div.sku-item-price",
+        "span[class*='Price']",
+        "h4[class*='price']",
+
         # Generic
         "span.price",
         ".product-price",
         "span[data-price]",
+        "div.price-section span",
     ]
 
     for sel in selectors:
@@ -465,31 +513,50 @@ def extract_offers_from_html(page, state,base_price):
     - Only extract clearly visible offers
     - Ignore EMI / financing
 
+    FINAL PRICE CALCULATION RULES:
+    1. Fixed discount:
+    - Example: "₹2000 off"
+    - discount_value = 2000
+
+    2. Percentage discount only:
+    - Example: "10% off"
+    - discount_value = (10/100) * base_price
+
+    3. "Up to ₹X" (no % mentioned):
+    - Example: "Up to ₹1200 off"
+    - discount_value = X (use as maximum possible discount)
+
+    4. "X% up to ₹Y":
+    - Example: "7.5% up to ₹7500"
+    - Calculate X% of base_price
+    - discount_value = MIN(calculated_value, Y)
+
+    FINAL PRICE:
+    - final_price = base_price - discount_value
+    - Do not inject discount_value into the discount text; discount text must be exactly as on the page
+
     IMPORTANT:
     - You MUST calculate final_price for every offer
-    - Use this formula:
-      final_price = base_price - discount
-    - If discount is "Up to ₹X", subtract X from base price
-    - If percentage discount, estimate using base price
-    - If exact value unclear, still give a reasonable approximation
+    - If exact discount is unclear, skip it (do NOT guess numbers)
+    - Only use discount_value for numeric calculation
 
     Return JSON:
     {{
-      "bank_offers": [
+    "bank_offers": [
         {{"bank": "", "discount": "", "final_price": ""}}
-      ],
-      "coupons": [
+    ],
+    "coupons": [
         {{"code": "", "discount": "", "final_price": ""}}
-      ],
-      "exchange_offers": [
+    ],
+    "exchange_offers": [
         {{"discount": "", "final_price": ""}}
-      ]
+    ]
     }}
     """
 
     try:
         res = client.models.generate_content(
-            model="models/gemini-2.5-flash",
+            model="models/gemini-2.5-flash-lite",
             contents=PROMPT,
             config={"response_mime_type": "application/json"}
         )
@@ -562,7 +629,7 @@ def apply_coupons(page, state, codes):
     }
 
     log(state, "🎯 Final offers ready", "success")
-    log(state, f"📦 Final offers: {json.dumps(state['offers'], indent=2)}", "info")
+    #log(state, f"📦 Final offers: {json.dumps(state['offers'], indent=2)}", "info")
 
 
 def is_realistic_price(final_price, base_price):
@@ -621,7 +688,7 @@ def generate_insight(state):
         """
 
         res = client.models.generate_content(
-            model="models/gemini-2.5-flash",
+            model="models/gemini-2.5-flash-lite",
             contents=PROMPT
         )
 
@@ -686,6 +753,5 @@ def run(product, goal, state, extra_codes=None):
             generate_insight(state)
         except Exception:
             log(state, "⚠️ Insight unavailable (quota reached)", "warning")
-
         finally:
             state["agent_running"] = False

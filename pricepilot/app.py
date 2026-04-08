@@ -202,7 +202,7 @@ with left:
     sites_data = state.get("selected_sites", {})
 
     if sites_data:
-        st.markdown("## Compare Deals")
+        st.markdown("## Compare Deals (Best 2)")
 
         selected_site = st.radio(
             "Choose website",
@@ -216,6 +216,7 @@ with left:
             with cols[i]:
                 st.markdown(f"### 🛍️ {site}")
 
+               
                 base_price = data["price"]
                 st.markdown(f"💰 **Base Price:** ₹{base_price:,.0f}")
 
@@ -230,9 +231,16 @@ with left:
                 if all_offers:
                     st.markdown("#### 🎁 Offers")
 
-                    all_offers = sorted(
-                        all_offers,
-                        key=lambda x: to_number(x.get("final_price", base_price))
+                    # Open the scrollable container **once**
+                    st.markdown(
+                        """
+                        <div style="
+                            max-height:300px;
+                            overflow-y:auto;
+                            padding-right:5px;
+                        ">
+                        """,
+                        unsafe_allow_html=True
                     )
 
                     for offer in all_offers:
@@ -255,7 +263,7 @@ with left:
                                 margin-bottom:8px;
                             ">
                                 <b>{label}</b><br>
-                                Save ₹{discount}<br>
+                                {discount}<br>
                                 <span style="color:green; font-weight:bold;">
                                     Final: ₹{final_price:,.0f}
                                 </span>
@@ -263,14 +271,17 @@ with left:
                             """,
                             unsafe_allow_html=True
                         )
+
+                    # Close the scrollable container **once, after all offers**
+                    st.markdown("</div>", unsafe_allow_html=True)
                 else:
                     st.info("No offers available")
 
-                if site == selected_site:
-                    st.markdown(
-                        "<div style='color:green; font-weight:bold;'>✅ Selected</div>",
-                        unsafe_allow_html=True
-                    )
+                #if site == selected_site:
+                #    st.markdown(
+                #        "<div style='color:green; font-weight:bold;'>✅ Selected</div>",
+                #        unsafe_allow_html=True
+                #    )
 
         # ---------------------------
         # 🛒 BUY BUTTON
@@ -313,9 +324,11 @@ with left:
             }}
             </style>
 
-            <a class="buy-button" href="{buy_url}" target="_blank">
-                <i class="fas fa-cart-shopping"></i> Buy from {selected_site}
-            </a>
+            <div style="text-align:center;">
+                <a class="buy-button" href="{buy_url}" target="_blank">
+                    <i class="fas fa-cart-shopping"></i> Buy from {selected_site}
+                </a>
+            </div>
             """, unsafe_allow_html=True)
         else:
             st.warning("No product link available")
@@ -324,19 +337,36 @@ with left:
 # RIGHT PANEL
 # -------------------------------
 with right:
-    if state.get("agent_running"):
-        st.subheader("Assistant Progress")
-        progress = min(len(state["action_log"]), 10) * 10
-        st.progress(progress)
 
+    #if state.get("agent_running"):
+    #    placeholder = st.empty()
+    #    
+    #    spinner_frames = ["⏳", "⌛", "🔄", "⏱️"]
+    #    
+    #    for i in range(20):  # simulate updates
+    #        # Keep icon and text on the same line
+    #        placeholder.markdown(
+    #            f'<span style="font-size:24px;">{spinner_frames[i % len(spinner_frames)]} Assistant Running…</span>',
+    #            unsafe_allow_html=True
+    #        )
+    #        time.sleep(0.3)
+            
+    #if state.get("agent_running"):
+    #    st.subheader("Assistant Progress")
+    #    progress = min(len(state["action_log"]), 10) * 10
+    #    st.progress(progress)
+    
     st.subheader("📜 Live Logs")
+ 
 
-    
-    # 🔥 Force re-render when insight arrives
+    # Decide expander key
     expander_key = "logs_open" if not state.get("insight") else "logs_closed"
+
     with st.expander("Logs", expanded=not state.get("insight"), key=expander_key):
-       
-    
+
+        # Wrap logs in a single scrollable div
+        log_html = '<div style="max-height:400px;min-height:100px; overflow-y:auto;  padding-bottom:10px; margin:0px; border:0px solid #ddd; ">'
+
         for log in state["action_log"]:
             msg = log.get("msg", "")
             typ = log.get("type", "info")
@@ -348,13 +378,19 @@ with right:
                 "warning": "#FF8C00",   # Dark Orange
                 "error": "#B22222"      # Firebrick Red
             }.get(typ, "#000000")       # default black
-            # Render inline like a terminal
-            st.markdown(
-                f'<span style="color:{color}; font-family:monospace;">[12:34:56] {typ.upper():7} {msg}</span><br>', 
-                unsafe_allow_html=True
-            )
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+
+            # Add log line
+            log_html += f'<span style="color:{color}; font-family:monospace;">[12:34:56] {typ.upper():7} {msg}</span><br>'
+            log_html += """
+                <script>
+                var logDiv = document.currentScript.parentNode;
+                logDiv.scrollTop = logDiv.scrollHeight;
+                </script>
+                """
+        log_html += '</div>'
+
+        # Render all logs at once inside expander
+        st.markdown(log_html, unsafe_allow_html=True)
     # ---------------------------
     # 🧠 AI INSIGHT
     # ---------------------------
