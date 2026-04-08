@@ -102,11 +102,10 @@ def start_agent():
     st.session_state.agent_state["agent_running"] = True
     st.session_state.agent_state["selected_sites"] = {}
 
-    extra_codes = []
 
     thread = threading.Thread(
         target=agent.run,
-        args=(product, "", st.session_state.agent_state, extra_codes),
+        args=(product, "", st.session_state.agent_state),
         daemon=True,
     )
     thread.start()

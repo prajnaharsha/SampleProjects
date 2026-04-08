@@ -21,9 +21,6 @@ FALLBACK_SITES = {
 }
 
 
-DEFAULT_CODES = ["SAVE10", "SAVE20", "DEAL10"]
-
-
 def get_popular_sites(product,state):
    
     """
@@ -72,11 +69,7 @@ def get_popular_sites(product,state):
             model="models/gemini-2.5-flash-lite",
             contents=prompt  # just a string
         )
-        #res = client.models.generate_content(
-        #    model="gemini-2.0-flash",
-        #    contents=prompt  # just a string
-        #)
-         
+       
         raw_text = res.text.strip()        
 
         # Extract JSON object from text
@@ -132,9 +125,7 @@ def extract_price(page):
     try:
         
         page.wait_for_load_state("networkidle", timeout=5000)
-        page.wait_for_timeout(2000)
-
-        # 👇 AND THIS (VERY IMPORTANT)
+        page.wait_for_timeout(2000)     
         page.mouse.wheel(0, 800)
         page.wait_for_timeout(1500)
     except:
@@ -378,7 +369,7 @@ def compare_prices(product, page, state):
     if not results:
         return None
 
-    # 🔥 NEW: pick top 2 cheapest
+    # pick top 2 cheapest
     sorted_sites = sorted(results.items(), key=lambda x: x[1]["price"])
     top2 = sorted_sites[:2]
 
@@ -426,20 +417,6 @@ def is_valid_discount(txt):
     return value is not None and value > 0
 
 
-def normalize(text):
-    if not text:
-        return ""
-    text = text.lower()
-    text = text.replace("₹", "")
-    text = text.replace(",", "")
-    text = text.replace("upto", "up to")
-    text = text.replace("  ", " ")
-    return text.strip()
-
-
-def is_duplicate(a, b):
-    return normalize(a) == normalize(b)
-
 
 def extract_json(text):
     import json
@@ -466,13 +443,7 @@ def extract_json(text):
     }
 
 def extract_offers_from_html(page, state,base_price):
-    def get_raw_text(res):
-        try:
-            return res.candidates[0].content.parts[0].text
-        except:
-            return res.text  # fallback
-        import re
-
+   
     log(state, "🌐 Extracting offers from page HTML...", "info")
 
     # Step 1: Try expanding offer sections
@@ -574,12 +545,10 @@ def extract_offers_from_html(page, state,base_price):
             log(state, "⚠️ HTML extraction failed: Could not fetch data from AI", "warning")
         return None
     
-def apply_coupons(page, state, codes):
+def apply_coupons(page, state):
 
     base_price = state.get("current_price", 0)
-    product = state.get("product", "product")
-    site = state.get("best_site", "Amazon")
-
+  
     # -----------------------------
     # 🥇 STEP 1: Try HTML extraction
     # -----------------------------
@@ -596,7 +565,7 @@ def apply_coupons(page, state, codes):
         ])
 
     # -----------------------------
-    # 🥈 NO  OFFERS
+    # NO  OFFERS
     # -----------------------------
     if not has_offers(data):
         log(state, "ℹ️ No offers found on page", "info")
@@ -607,9 +576,8 @@ def apply_coupons(page, state, codes):
         }  
         
     #log(state, f"🧪 Raw AI offers: {json.dumps(data)}", "info")
-    # -----------------------------
-    # 🧹 CLEAN + STORE
-    # -----------------------------
+   
+    
     state["offers"] = {
         "bank_offers": [
             b for b in data.get("bank_offers", [])
@@ -637,6 +605,8 @@ def is_realistic_price(final_price, base_price):
     if val is None:
         return False
     return 0 < val <= base_price
+
+
 def generate_insight(state):
     try:
         sites = state.get("selected_sites", {})
@@ -705,9 +675,7 @@ def generate_insight(state):
 # -----------------------------
 # MAIN RUN
 # -----------------------------
-def run(product, goal, state, extra_codes=None):
-
-    codes = (extra_codes or []) + DEFAULT_CODES
+def run(product, goal, state):
 
     with sync_playwright() as p:
 
@@ -740,7 +708,7 @@ def run(product, goal, state, extra_codes=None):
                 state["current_price"] = data["price"]
                 state["best_site"] = site
 
-                apply_coupons(page, state, codes)
+                apply_coupons(page, state)
 
                 # store offers per site
                 state["selected_sites"][site]["offers"] = state["offers"]
