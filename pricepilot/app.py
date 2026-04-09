@@ -83,6 +83,25 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+def reset_agent_state():
+    st.session_state.agent_state = {
+        "action_log": [],
+        "agent_running": False,
+        "approval_pending": False,
+        "approval_action": None,
+        "approval_response": None,
+        "approval_saving": 0,
+        "best_code": None,
+        "original_price": None,
+        "current_price": None,
+        "price_comparison": {},
+        "offers": {},
+        "current_product": "",
+        "selected_sites": {},
+        "insight": None  # 🔥 important
+    }
+
 # -------------------------------
 # HELPER FUNCTIONS
 # -------------------------------
@@ -97,6 +116,10 @@ def to_number(price):
 def start_agent():
     if st.session_state.agent_state["agent_running"]:
         return
+    
+    #RESET EVERYTHING BEFORE NEW RUN
+    reset_agent_state()
+
 
     st.session_state.agent_state["action_log"] = []
     st.session_state.agent_state["agent_running"] = True
@@ -228,7 +251,7 @@ with left:
                 )
 
                 if all_offers:
-                    st.markdown("#### 🎁 Offers")
+                    st.markdown("#### 🎁 Offerss")
 
                     # Open the scrollable container **once**
                     st.markdown(

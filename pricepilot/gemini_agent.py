@@ -13,11 +13,15 @@ from urllib.parse import urljoin
 # -----------------------------
 client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 FALLBACK_SITES = {
-   "Myntra":   "https://www.myntra.com/{q}",
-   "Ajio":     "https://www.ajio.com/search/?text={q}",
-   "Reliance Digital": "https://www.reliancedigital.in/products?q={q}",    
-   "Amazon":   "https://www.amazon.in/s?k={q}",
-   "Flipkart": "https://www.flipkart.com/search?q={q}"   
+   #"SapnaOnline": "https://www.sapnaonline.com/search?keyword={{q}}",
+   #"Bookswagon": "https://www.bookswagon.com/search-books/{{q}}",
+   #"Myntra":   "https://www.myntra.com/{{q}}",
+   #"Ajio":     "https://www.ajio.com/search/?text={{q}}",
+   "Shopclues": "https://www.shopclues.com/search?q={{q}}",   
+   "Reliance Digital": "https://www.reliancedigital.in/products?q={{q}}",    
+   "Amazon": "https://www.amazon.in/s?k={{q}}",
+   "Flipkart": "https://www.flipkart.com/search?q={q}"   ,
+   "Croma": "https://www.croma.com/searchB?q={{q}}%3Arelevance"
 }
 
 
@@ -35,11 +39,33 @@ def get_popular_sites(product,state):
     }}
     Example:
     {{
+        SapnaOnline: https://www.sapnaonline.com/search?keyword={{q}},
+        Bookswagon: https://www.bookswagon.com/search-books/{{q}},
         "Amazon": "https://www.amazon.in/s?k={{q}}",
         "Flipkart": "https://www.flipkart.com/search?q={{q}}",
         "Reliance Digital": "https://www.reliancedigital.in/products?q={{q}}", 
         "Croma": "https://www.croma.com/searchB?q={{q}}%3Arelevance"
     }}
+
+    
+    Rules:
+    - Choose websites relevant to the product category
+    - Avoid irrelevant sites (e.g. electronics stores for books)
+
+    STRICT OUTPUT RULES:
+    - Return ONLY a single JSON object
+    - Do NOT return a list (no [])
+    - Do NOT split into multiple objects
+    - Do NOT include any text before or after JSON
+    - Keys must be site names, values must be URLs
+    - Maximum 4 sites
+
+    STRICT RELEVANCE RULE:
+    - ONLY choose websites that primarily sell this product category
+    - DO NOT include general marketplaces unless they are highly relevant
+    - For books: prefer book-specific stores (e.g. Bookswagon)
+    - NEVER include unrelated categories (e.g. grocery, baby products)
+
 
     IMPORTANT:
     - If the site is one of these, you MUST use the EXACT URL pattern:
@@ -54,10 +80,18 @@ def get_popular_sites(product,state):
         Blinkit: https://blinkit.com/s/?q={{q}}
         Zepto: https://www.zeptonow.com/search?query={{q}}
         JioMart: https://www.jiomart.com/search/{{q}}
+        Bookswagon: https://www.bookswagon.com/search-books/{{q}}
+        SapnaOnline: https://www.sapnaonline.com/search?keyword={{q}}
     - If you choose ANY of the above sites, DO NOT modify their URL format
     - For other websites, generate a valid search URL using {{q}}
 
-    EXLCDUE Flipkart
+    EXCLUDE infibeam for books. 
+    For books, prefer Bookswagon, Amazon, SapnaOnline,Shopclues,Flipkart.
+    For consumer electronics, prefer Amazon, Reliance Digital, Croma,Flipkart,Shopclues.
+
+    Return ONLY a single valid JSON object.
+    Do NOT return multiple JSON objects.
+    Do NOT include any text before or after JSON.
 
     """
 
@@ -67,10 +101,15 @@ def get_popular_sites(product,state):
     try:
         res = client.models.generate_content(
             model="models/gemini-2.5-flash-lite",
-            contents=prompt  # just a string
+            contents=prompt,  # just a string,
+            config={
+                "response_mime_type": "application/json"
+            }
         )
        
-        raw_text = res.text.strip()        
+        raw_text = res.text.strip()  
+
+        #log(state, f"📦 RAW AI RESPONSE:\n{raw_text}", "info")      
 
         # Extract JSON object from text
         match = re.search(r"\{.*\}", raw_text, re.DOTALL)
@@ -121,6 +160,107 @@ def ask_vision(image, prompt):
 # DOM PRICE EXTRACTION
 # -----------------------------
 def extract_price(page):
+
+    import re
+
+    # ✅ Wait + scroll (keep this)
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=5000)
+        page.wait_for_timeout(1500)
+        page.mouse.wheel(0, 2000)
+        page.wait_for_timeout(1500)
+    except:
+        pass
+
+    # 🔥 1. FLIPKART (search page FIX)
+    try:
+        cards = page.locator("div[data-id]").all()
+
+        for card in cards:
+            text = card.inner_text()
+
+            match = re.search(r"₹\s?\d[\d,]*", text)
+            if match:
+                return float(match.group().replace("₹", "").replace(",", ""))
+    except:
+        pass
+
+    # 🔥 2. SAPNAONLINE FIX (ProductCard based)
+    try:
+        cards = page.locator("div[class*='ProductCard']").all()
+
+        for card in cards:
+            text = card.inner_text()
+
+            match = re.search(r"(₹|Rs\.?)\s?\d[\d,]*", text)
+            if match:
+                return float(
+                    match.group()
+                    .replace("₹", "")
+                    .replace("Rs.", "")
+                    .replace(",", "")
+                    .strip()
+                )
+    except:
+        pass
+
+    # 🔥 3. SELECTOR-BASED FALLBACK (fixed bug)
+    selectors = [
+        "div._30jeq3", "div.Nx9bqj", "div[class*='Nx9bqj']",  # Flipkart
+        "span.a-offscreen",                                  # Amazon
+        "span.s-item__price",                                # eBay
+        "span.jm-price",                                     # JioMart
+        "span.pdp-price", "span.pdp-discounted-price",        # Myntra
+        "span.price", "div.price strong",                    # Ajio
+        "span.actual-price", "span.sell-price",              # Bookswagon
+        ".price", ".product-price", ".our-price",            # Sapna fallback
+        "span[class*='price']", "div[class*='price']"        # Generic
+    ]
+
+    for sel in selectors:
+        try:
+            els = page.locator(sel)
+
+            if els.count() == 0:
+                continue
+
+            raw = els.first.inner_text().strip()
+
+            match = re.search(r"(₹|Rs\.?)?\s?\d[\d,]*", raw)
+            if not match:
+                continue
+
+            price = float(
+                match.group()
+                .replace("₹", "")
+                .replace("Rs.", "")
+                .replace(",", "")
+                .strip()
+            )
+
+            if price > 0:
+                return price
+
+        except:
+            continue
+
+    # 🔥 4. FINAL REGEX FALLBACK (VERY POWERFUL)
+    try:
+        html = page.content()
+        match = re.search(r"(₹|Rs\.?)\s?\d[\d,]*", html)
+        if match:
+            return float(
+                match.group()
+                .replace("₹", "")
+                .replace("Rs.", "")
+                .replace(",", "")
+                .strip()
+            )
+    except:
+        pass
+
+    return None
+def extract_price_old(page):
     # Wait for page to stabilize
     try:
         
@@ -154,13 +294,24 @@ def extract_price(page):
         "span.old-price",
         "div.price-section span",
         "div.product-price span",
-
+        # -----------------------------
+        # eBay
+        # -----------------------------
+        "span.x-price-primary",     # 🔥 main product price
+        "div.x-price-primary span",
+        "span.notranslate",         # common price class
+        "span.s-item__price",       # search results
         # -----------------------------
         # JioMart
         # -----------------------------
         "span.jm-price",
         "div.plp-card-details-price",
         "div[class*='price'] span",
+        "span.jm-heading-xxs",               # Current price on search results
+        "div.plp-card-details-price span",   # Container for price
+        "span#final_price",                  # Product page specific
+        "span.jm-body-m-bold.jm-fc-primary-grey-100", # Alternative listing price
+            
 
         # -----------------------------
         # Myntra
@@ -182,12 +333,52 @@ def extract_price(page):
         "span[class*='Price']",
         "h4[class*='price']",
 
+         # --- Add Bookswagon/Bookstore specific selectors ---
+        "span.actual-price", 
+        "span.sell-price",
+        ".price-section .price",
+
         # Generic
         "span.price",
         ".product-price",
         "span[data-price]",
         "div.price-section span",
-    ]
+        "span[class*='price']",
+        "div[class*='price']",
+        "[data-price]",
+        ".search-books .price",
+        ".search-books span",
+
+        # SapnaOnline
+        ".price",
+        ".product-price",
+        ".our-price",
+        "span[id*='price']",
+
+        # -----------------------------
+        # ShopClues
+        # -----------------------------
+        "#product_price",                 # 🔥 main product price
+        "span.f_price",                  # discounted price
+        "span#sec_discounted_price",     # alternate discounted price
+        ".meta-item-price",              # container price
+        "span[id*='price']",             # fallback dynamic ids
+        "div[class*='price'] span"       # generic fallback
+            ]
+    
+    try:
+        cards = page.locator("div[class*='ProductCard']").all()
+
+        for card in cards:
+            text = card.inner_text()
+
+            match = re.search(r"(₹|Rs\.?)\s?\d[\d,]*", text)
+            if match:
+                price = float(match.group().replace("₹", "").replace("Rs.", "").replace(",", "").strip())
+                if price > 0:
+                    return price
+    except:
+        pass
 
     for sel in selectors:
         try:
@@ -220,6 +411,7 @@ def extract_product_url_from_dom(page, state, site):
     """
     Extract product URL from search results page using DOM selectors
     """
+
     try:
         # Site-specific selectors for product links
         site_selectors = {
@@ -245,10 +437,77 @@ def extract_product_url_from_dom(page, state, site):
                  "a[href*='/product/']",       # matches any product link
                 "div.product-wrapper a",      # product card wrapper
                 "div.product-card a"          # alternate card layout
+            ],
+            "JioMart": [
+                "a.plp-card-main-container", # The main wrapper link
+                "a[href*='/p/']",            # JioMart does use /p/ in product paths
+                ".plp-card-details a"        # Fallback for the title link
+            ],
+            "Bookswagon": [
+                "a[href*='/book/']",           # Primary product link pattern
+                ".title-author a",              # Link on the title
+                ".search-results-item-body a"   # Wrapper link
+            ],
+            "ShopClues": [
+                "a[href*='/item/']",              # 🔥 primary product link
+                "div.product-tile a",             # product card
+                "div.column.col3 a",              # grid layout
+                "a[href*='shopclues.com/item']"   # fallback
+            ],
+            
+            "eBay": [
+                "ul.srp-results li.s-item a.s-item__link",  # 🔥 most reliable
+                "li.s-item__pl-on-bottom a.s-item__link",   # alternate layout
+                "a.s-item__link",                           # fallback
+            ],
+            "SapnaOnline": [
+                "a[href*='books/']",
+                ".search-books a",
+                ".product-title a"
+            ],
+            "Kitabay": [
+                "a[href*='/products/']",
+                ".product-item a"
+            ],
+            "PustakKosh": [
+                "a[href*='/books/']",
+                ".product-name a"
             ]
         }
         
-        selectors = site_selectors.get(site, ["a[href*='/p/']", "a[href*='/dp/']"])
+        #selectors = site_selectors.get(site, ["a[href*='/p/']", "a[href*='/dp/']"])
+        site_key = site.strip().lower()
+        site_selectors = {k.lower(): v for k, v in site_selectors.items()}
+        selectors = site_selectors.get(site_key, ["a[href*='/p/']", "a[href*='/dp/']"])
+
+        if site_key == "ajio":
+            try:
+                page.wait_for_selector("a[href*='/p/']", timeout=5000)
+                page.mouse.wheel(0, 3000)
+                page.wait_for_timeout(2000)
+
+                links = page.locator("a[href*='/p/']").all()
+
+                for link in links:
+                    href = link.get_attribute("href")
+
+                    if href and "/p/" in href and not any(x in href for x in ["login", "account", "cart"]):
+                        return urljoin(page.url, href)
+            except:
+                pass
+        if site == "ShopClues":
+            try:
+                page.wait_for_selector("a[href*='/item/']", timeout=5000)
+
+                links = page.locator("a[href*='/item/']").all()
+
+                for link in links:
+                    href = link.get_attribute("href")
+                    if href and "/item/" in href:
+                        href = urljoin(page.url, href)
+                        return href
+            except:
+                pass
         
         for selector in selectors:
             try:
@@ -342,8 +601,10 @@ def compare_prices(product, page, state):
 
     for site, url_tpl in COMPARE_SITES.items():
         try:
+            url_tpl = url_tpl.replace("{{q}}", "{q}")
+            url = url_tpl.replace("{q}", q)
             url = url_tpl.format(q=q)
-
+            log(state, f"🌐 URL: {url}", "info")
             log(state, f"🔎 Checking {site}...")
             page.goto(url, timeout=15000)
             page.wait_for_timeout(2000)
@@ -352,6 +613,9 @@ def compare_prices(product, page, state):
             page.wait_for_timeout(700)
 
             product_url = extract_product_url_from_dom(page, state, site)
+            if not product_url:
+                continue
+
             price = get_price(product, page, state, site)
 
             if not price:
@@ -534,7 +798,7 @@ def extract_offers_from_html(page, state,base_price):
         
         data = json.loads(res.text)
 
-        log(state, f"✅ RAW AI Response: {res.text}", "success")        
+        #log(state, f"✅ RAW AI Response: {res.text}", "success")        
 
         return data
 
@@ -637,6 +901,7 @@ def generate_insight(state):
         1. Deal Insight:
         - Which site is better and why
         - Consider final price, reliability, realism of offers
+        - 
 
         2. Product Insight:
         - Is this product generally good?
@@ -646,14 +911,15 @@ def generate_insight(state):
         Rules:
         - Max 6-7 lines total
         - Be crisp and practical
+        - Add a blank line after Deal Insight section
         - No fluff
 
         Output format:
 
-        Deal Insight:
+        **Deal Insight:**
         ...
 
-        Product Insight:
+        **Product Insight:**
         ...
         """
 
