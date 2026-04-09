@@ -312,48 +312,43 @@ with left:
         buy_url = selected_data.get("product_url") or selected_data.get("search_url")
 
         st.markdown("---")
-        
+        # ✅ CONSENT FLOW
         if buy_url:
-            st.markdown(f"""
-                        
-            <!-- Load Font Awesome -->
-            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+            if not state.get("approval_pending") and not state.get("approval_response"):
+                if st.button("🛒 Open Best Deal"):
+                    state["approval_pending"] = True
 
-            <style>
-            .buy-button {{
-                background: linear-gradient(90deg, #4B6CFE, #667EFF);
-                color: white !important;
-                padding: 10px 25px;
-                border-radius: 10px;
-                font-size: 16px;
-                font-weight: 600;
-                text-decoration: none; /* This removes the underline */
-                display: inline-block;
-                transition: 0.2s all ease;
-            }}
-            .buy-button, 
-            .buy-button:link, 
-            .buy-button:visited, 
-            .buy-button:hover, 
-            .buy-button:active, 
-            .buy-button:focus {{
-                text-decoration: none !important;
-                color: white !important;
-            }}
-            .buy-button:hover {{
-                opacity: 0.85;
-                transform: translateY(-1px);
-            }}
-            </style>
+            if state.get("approval_pending"):
+                st.warning("⚠️ Open best deal in browser?")
 
-            <div style="text-align:center;">
-                <a class="buy-button" href="{buy_url}" target="_blank">
-                    <i class="fas fa-cart-shopping"></i> Buy from {selected_site}
-                </a>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.warning("No product link available")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    # Use <a> tag instead of <button> for guaranteed browser open
+                    st.markdown(f'''
+                        <a href="{buy_url}" target="_blank" 
+                        style="
+                            background: none; 
+                            color: white;
+                            padding: 10px 25px;
+                            border-radius: 10px;
+                            font-size: 16px;
+                            font-weight: 600;
+                            text-decoration: none;
+                            color: black;
+                            display: inline-block;">
+                        ✅ Yes
+                        </a>
+                    ''', unsafe_allow_html=True)
+
+                    # reset state after rendering the link
+                    state["approval_pending"] = False
+                    state["approval_response"] = "yes"
+
+                with col2:
+                    if st.button("❌ No Continue Exploring"):
+                        state["approval_pending"] = False
+                        state["approval_response"] = "no"
 
 # -------------------------------
 # RIGHT PANEL
@@ -417,7 +412,7 @@ with right:
     # 🧠 AI INSIGHT
     # ---------------------------
     if state.get("insight"):
-        st.markdown("## 🧠 Smart Recommendation")
+        st.markdown("## Smart Recommendation")
 
         st.markdown(
             f"""
